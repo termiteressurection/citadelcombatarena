@@ -18,14 +18,14 @@ describe('colliders', () => {
 
 describe('ludus layout', () => {
   it('has a solid for every column (no invisible or missing colliders)', () => {
-    expect(COLUMNS.length).toBeGreaterThan(30);
+    expect(COLUMNS.length).toBeGreaterThanOrEqual(30);
     for (const c of COLUMNS) expect(SOLIDS.some((s) => s.x === c.pos[0] && s.z === c.pos[2])).toBe(true);
   });
   it('spawns the player in free space', () => {
     expect(isFree(PLAYER_START.x, PLAYER_START.z, 0.55, SOLIDS, BOUNDS)).toBe(true);
   });
   it('keeps every station reachable and inside the court', () => {
-    expect(STATIONS).toHaveLength(5);
+    expect(STATIONS).toHaveLength(9);
     for (const s of STATIONS) {
       expect(s.pos[0]).toBeGreaterThan(BOUNDS.minX);
       expect(s.pos[0]).toBeLessThan(BOUNDS.maxX);
@@ -35,6 +35,6 @@ describe('ludus layout', () => {
     }
   });
   it('leaves the Gate opening walkable', () => {
-    expect(isFree(0, -41, 0.55, SOLIDS, BOUNDS)).toBe(true);
+    expect(isFree(0, -48, 0.55, SOLIDS, BOUNDS)).toBe(true);
   });
 });

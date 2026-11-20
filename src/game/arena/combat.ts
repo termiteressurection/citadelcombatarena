@@ -1,5 +1,6 @@
 /** Pure combat rules. No rendering, no physics: everything here is unit-tested. */
-import { moveOf, styleOf, type ArmorKey, type StyleDef, type StyleId } from './styles';
+import { type ArmorKey, type StyleId } from './styles';
+import { gearFromStyle, type ResolvedGear } from '../rpg/items';
 
 export type Kind = 'player' | 'skirmisher' | 'brute' | 'champion';
 export type State = 'idle' | 'windup' | 'strike' | 'recover' | 'dodge' | 'stagger' | 'dead';
@@ -28,7 +29,7 @@ export function makeLimbs(maxHp: number): Limbs {
   };
 }
 
-export function makeArmor(style: StyleDef): Armor {
+export function makeArmor(style: { armor: Record<ArmorKey, number> }): Armor {
   const slot = (max: number): ArmorSlot => ({ hp: max, max, broken: max <= 0 });
   return {
     helm: slot(style.armor.helm),
@@ -99,12 +100,14 @@ export const BLOCK_ARC = (70 * Math.PI) / 180;
 export interface Mods {
   dmg: number; heavyDmg: number; stamRegen: number; speed: number; healOnKill: number; thorns: number;
   parryWindow: number; dodgeCost: number; blockStam: number; maxHp: number; maxStamina: number; glory: number;
+  riposteBonus?: number;
 }
 export const defaultMods = (): Mods => ({
-  dmg: 1, heavyDmg: 1, stamRegen: 1, speed: 1, healOnKill: 0, thorns: 0, parryWindow: 0, dodgeCost: 0, blockStam: 0, maxHp: 0, maxStamina: 0, glory: 1,
+  dmg: 1, heavyDmg: 1, stamRegen: 1, speed: 1, healOnKill: 0, thorns: 0, parryWindow: 0, dodgeCost: 0, blockStam: 0, maxHp: 0, maxStamina: 0, glory: 1, riposteBonus: 0,
 });
 export const dodgeCostOf = (f: Fighter) => Math.max(4, DODGE_COST - f.mods.dodgeCost);
-export const parryWindowOf = (f: Fighter) => PARRY_WINDOW + f.mods.parryWindow + styleOf(f.style).parryBonus;
+export const gearOf = (f: Fighter): ResolvedGear => f.gear ?? gearFromStyle(f.style);
+export const parryWindowOf = (f: Fighter) => PARRY_WINDOW + f.mods.parryWindow + gearOf(f).parryBonus;
 
 export interface AiState {
   mode: 'approach' | 'duel' | 'flank' | 'feintBack' | 'punish' | 'recoverStam';
@@ -122,7 +125,7 @@ export interface AiState {
 }
 
 export interface Fighter {
-  id: number; kind: Kind; style: StyleId; team: 'p' | 'e'; stats: Stats;
+  id: number; kind: Kind; style: StyleId; gear?: ResolvedGear; team: 'p' | 'e'; stats: Stats;
   x: number; z: number; vx: number; vz: number; yaw: number;
   hp: number; maxHp: number; stamina: number; maxStamina: number; staminaDelay: number;
   limbs: Limbs;
@@ -154,16 +157,16 @@ export interface HitEvent {
   armorBroken?: ArmorKey; snared?: boolean; riposte?: boolean;
 }
 
-export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: Mods = defaultMods(), style?: StyleId): Fighter {
+export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: Mods = defaultMods(), style?: StyleId, gear?: ResolvedGear): Fighter {
   const stats = KINDS[kind];
   const resolvedStyle = style ?? DEFAULT_STYLE[kind];
-  const stDef = styleOf(resolvedStyle);
+  const resolvedGear = gear ?? gearFromStyle(resolvedStyle);
   const maxHp = stats.hp + mods.maxHp;
   return {
-    id, kind, style: resolvedStyle, team: kind === 'player' ? 'p' : 'e', stats, x, z, vx: 0, vz: 0, yaw: 0,
+    id, kind, style: resolvedStyle, gear: resolvedGear, team: kind === 'player' ? 'p' : 'e', stats, x, z, vx: 0, vz: 0, yaw: 0,
     hp: maxHp, maxHp, stamina: stats.stamina + mods.maxStamina, maxStamina: stats.stamina + mods.maxStamina, staminaDelay: 0,
     limbs: makeLimbs(maxHp),
-    armor: makeArmor(stDef),
+    armor: makeArmor(resolvedGear),
     snared: 0,
     state: 'idle', atk: null, t: 0, stagger: 0, blocking: false, blockT: 0, iframes: 0,
     parryHold: 0, parryCd: 0, riposte: 0, riposteActive: false,
@@ -180,27 +183,39 @@ export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: 
   };
 }
 
+export function drinkFlask(f: Fighter): boolean {
+  if (f.state === 'dead') return false;
+  const needsLimb = LIMB_KEYS.some((k) => !f.limbs[k].severed && f.limbs[k].hp < f.limbs[k].max);
+  if (f.hp >= f.maxHp && !needsLimb) return false;
+  f.hp = Math.min(f.maxHp, f.hp + Math.round(f.maxHp * 0.45));
+  for (const k of LIMB_KEYS) {
+    const l = f.limbs[k];
+    if (!l.severed) l.hp = Math.min(l.max, l.hp + Math.round(l.max * 0.45));
+  }
+  return true;
+}
+
 export function canBlockOf(f: Fighter): boolean {
-  const st = styleOf(f.style);
+  const st = gearOf(f);
   if (st.hasShield) return f.limbs.armL.hp > 0 && !f.limbs.armL.severed;
   if (st.dualWield) return f.limbs.armL.hp > 0 && !f.limbs.armL.severed && f.limbs.armR.hp > 0 && !f.limbs.armR.severed;
   return f.limbs.armR.hp > 0 && !f.limbs.armR.severed;
 }
 
 export function isDisarmedOf(f: Fighter): boolean {
-  const st = styleOf(f.style);
+  const st = gearOf(f);
   return st.dualWield ? (f.limbs.armR.severed && f.limbs.armL.severed) : f.limbs.armR.severed;
 }
 
 const isArmWeak = (f: Fighter): boolean => {
-  const st = styleOf(f.style);
+  const st = gearOf(f);
   if (isDisarmedOf(f)) return false;
   return f.limbs.armR.hp <= 0 || (st.dualWield && f.limbs.armL.hp <= 0);
 };
 
 export function windupOf(f: Fighter, a: Atk): number {
-  const st = styleOf(f.style);
-  const mv = moveOf(f.style, a);
+  const st = gearOf(f);
+  const mv = st.moves[a];
   const crippledArm = isArmWeak(f) ? 1.25 : 1;
   const riposteSpeed = f.riposteActive || f.riposte > 0 ? 0.68 : 1;
   const raw = ATTACKS[a].windup * f.stats.windupMul * st.windupMul * (mv.windupMul ?? 1) * crippledArm * riposteSpeed;
@@ -270,7 +285,7 @@ function enterDodge(f: Fighter, i: Intent): void {
 export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter | null): boolean {
   if (f.state === 'dead') return false;
   let strikeFrame = false;
-  const st = styleOf(f.style);
+  const st = gearOf(f);
   const disarmed = isDisarmedOf(f);
   const canBlock = canBlockOf(f);
 
@@ -333,7 +348,7 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
       }
       if (f.t >= wt) {
         const at = ATTACKS[f.atk!];
-        const mv = moveOf(f.style, f.atk!);
+        const mv = st.moves[f.atk!];
         f.state = 'strike'; f.t = 0; strikeFrame = true;
         f.kx += Math.sin(f.yaw) * at.lunge * st.lungeMul * (mv.lungeMul ?? 1) * legSpeedMul;
         f.kz += Math.cos(f.yaw) * at.lunge * st.lungeMul * (mv.lungeMul ?? 1) * legSpeedMul;
@@ -423,11 +438,12 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
   const out: HitEvent[] = [];
   if (!a.atk) return out;
   const at = ATTACKS[a.atk];
-  const st = styleOf(a.style);
-  const mv = moveOf(a.style, a.atk);
+  const st = gearOf(a);
+  const mv = st.moves[a.atk];
   const heavy = a.atk === 'heavy';
   const armMul = isArmWeak(a) ? 0.65 : 1;
   const riposteHit = a.riposteActive;
+  const riposteMul = riposteHit ? RIPOSTE_DMG_MUL + (a.mods.riposteBonus ?? 0) : 1;
   const reach = st.netHeavy && heavy ? 4.6 : at.reach * st.reachMul * (mv.reachMul ?? 1);
   const half = mv.half ?? at.half;
   const knock = at.knock * st.knockMul * (mv.knockMul ?? 1);
@@ -440,11 +456,11 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
     const ang = Math.atan2(dx, dz) - a.yaw;
     if (Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) > half) continue;
     const ux = dx / d, uz = dz / d;
-    const dmg = at.dmg * a.stats.dmgMul * st.dmgMul * (mv.dmgMul ?? 1) * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1) * armMul * (riposteHit ? RIPOSTE_DMG_MUL : 1);
+    const dmg = at.dmg * a.stats.dmgMul * st.dmgMul * (mv.dmgMul ?? 1) * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1) * armMul * riposteMul;
     const base = { attacker: a.id, victim: v.id, heavy, atk: a.atk, dx: ux, dz: uz, x: (a.x + v.x) / 2, z: (a.z + v.z) / 2 };
 
     // blocking & parry: defender must be able to block and face the attacker
-    const vst = styleOf(v.style);
+    const vst = gearOf(v);
     const canBlock = canBlockOf(v);
     const faceAng = Math.atan2(-dx, -dz) - v.yaw;
     const facing = Math.abs(Math.atan2(Math.sin(faceAng), Math.cos(faceAng))) <= BLOCK_ARC;
@@ -582,7 +598,7 @@ const AI_PROFILE: Record<StyleId, AiStyleProfile> = {
 /** Tactical Gladiator AI. Reads telegraphs cleanly, dodges, parries, punishes turtling, chains combos, and flanks. */
 export function aiIntent(f: Fighter, target: Fighter, dt: number, allies?: Fighter[]): Intent {
   const cfg = f.stats.ai!;
-  const st = styleOf(f.style);
+  const st = gearOf(f);
   const prof = AI_PROFILE[f.style] ?? AI_PROFILE.murmillo;
   const ai = f.ai;
   const it: Intent = { moveX: 0, moveZ: 0, light: false, heavy: false, bash: false, block: false, parry: false, dodge: false };
@@ -631,7 +647,7 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number, allies?: Fight
 
   // Chain multi-hit combos during active strike/recover frames
   if (!disarmed && (f.state === 'strike' || f.state === 'recover') && (f.atk === 'light' || f.atk === 'light2') && ai.comboLeft > 0 && !f.queuedAtk && d < reach + 1.15) {
-    const finHeavy = (f.style === 'executioner' || f.style === 'dimachaerus') && f.comboStep === 1 && Math.random() < 0.35;
+    const finHeavy = (st.heavyBreaksBlock || st.dualWield) && f.comboStep === 1 && Math.random() < 0.35;
     const cost = finHeavy ? ATTACKS.heavy.stamina : ATTACKS.light2.stamina;
     if (f.stamina >= cost) {
       ai.comboLeft--;
@@ -661,7 +677,7 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number, allies?: Fight
     const dodgeProb = isHeavyThreat ? Math.min(0.88, prof.dodgeRate * 1.4) : prof.dodgeRate;
     const r = Math.random();
     if (canDodge && r < dodgeProb) {
-      const backBias = f.style === 'retiarius' || f.style === 'hoplomachus' ? 0.65 : 0.25;
+      const backBias = st.netHeavy || st.moves.heavy.motion === 'thrust' ? 0.65 : 0.25;
       it.dodge = true;
       it.moveX = rx * ai.strafe - fx * backBias;
       it.moveZ = rz * ai.strafe - fz * backBias;
@@ -757,7 +773,7 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number, allies?: Fight
   const maxStrikeDist = st.reachMul >= 1.2 ? reach + 1.0 : reach + 0.75;
   if (ai.timer >= readyAt && d <= maxStrikeDist) {
     const r = Math.random();
-    const hvyDist = f.style === 'hoplomachus' ? reach + 1.4 : maxStrikeDist;
+    const hvyDist = st.moves.heavy.motion === 'thrust' ? reach + 1.4 : maxStrikeDist;
     const chooseHeavy = r < Math.max(cfg.heavyChance, prof.heavyRate) && d <= hvyDist && f.stamina >= ATTACKS.heavy.stamina;
     const chooseBash = !chooseHeavy && r > 0.88 && d < 2.25 && f.stamina >= ATTACKS.bash.stamina;
     if (chooseHeavy) {

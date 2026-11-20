@@ -35,21 +35,26 @@ Unrelated to the Citadel project; repo is only a source of art/tech. Ludus = cal
   - Per-weapon movesets (`styles.ts`, `Gladiator.tsx`, `effects.tsx`): unique `MoveSpec`s & 3D animations (`thrust`, `sweep`, `crush`, `twinSlash`, `twinCross`, `netThrow`, `slash`, `backhand`, `overhead`, `bash`) + piercing lance streaks — including **Hoplomachus** spear **Impale Charge** heavy thrust (`1.38×` reach, `1.85×` lunge), **Executioner** wide sweeps + **Skull Breaker**, **Dimachaerus** **Scissor Cross**, and **Retiarius** trident thrust + **Energy Net Cast**.
   - Responsive Parry & Riposte (`combat.ts`, `Arena.tsx`, `Gladiator.tsx`): `0.26s` tap-parry sustain, recovery & early-windup feint cancels into parry, bright parry flash glint on enemy attacks, `1.35s` attacker stagger + `+25` defender stamina, and `1.4s` molten-gold **`1.65×` `RIPOSTE!`** counter window (still beaten cleanly by shield `bash`).
   - Tactical Reactive Gladiator AI (`combat.ts`): per-style `AI_PROFILE`, deliberate one-shot reads on player windups to dodge laterally/back (`dodgeRate`) or parry/block, dodge-cancels out of recovery (`dimachaerus`/`retiarius`), multi-hit combo chaining, anti-turtle `bash`/heavy guard-breaking, and multi-enemy flanking separation.
+- [x] ***FATE*-Inspired PS1 Roman Town Gladiator Life-Sim RPG** — COMPLETE (51/51 tests across 5 test files + `tsc` + `vite build` clean):
+  - **Walkable Roman Town & Forum Marketplace** (`world/layout.ts`, `Ludus.tsx`, `Stations.tsx`, `art/ps1Textures.ts`, `art/Ps1Sky.tsx`): expanded `-48..48` x `-64..44` hilltop cobblestone terrace with South Barracks, central Flagstone Forum Square & Fountain Basin, paved Colosseum Avenue, 13 perimeter low-poly stucco townhouses (`plaster` & `roof` Bayer-dithered textures), 12 Mediterranean cypresses, 6 wandering unarmed `civilian` townsfolk, 4 wandering gladiators, and Morning sunlight <-> Dusk twilight day cycle.
+  - **Classless Modular Gear & Weapons** (`rpg/items.ts`, `Gladiator.tsx`, `Arena.tsx`, `HUD.tsx`): independent slots for Main Weapon (13 weapons across `gladius`, `spear`, `twinSica`, `warhammer`, `trident`), Off-Hand (shields & `gladiator_net`), Helm, Body Armor, and Cape; equipped Weapon sets light/heavy movesets while `gladiator_net` overrides Heavy into `Energy Net Cast` and 2H weapons store the offhand automatically.
+  - **RPG Progression, Quests, Fight Cards & Option-A Career** (`rpg/stats.ts`, `rpg/quests.ts`, `store.ts`, `combat.ts`, `HUD.tsx`): 5 upgradeable stats (`vit`, `str`, `agi`, `end`, `tec`) with `+3` points per level-up, Fame Ranks (`RECRUIT` -> `LIVING LEGEND`), `[H]` Healing Flasks (`drinkFlask`) & daily food/oil buffs at Apothecary, Daily Contracts at the Contract Board, Daily Training Yard drill (`+35 XP`), `[C]` right-docked 3D Gear & Attributes drawer, 4 Daily Colosseum Fight Cards at the Gate, and Option-A defeat recovery in the Barracks (small healer fee + `-15` Fame while preserving stats & gear).
 - [ ] **Phase C — Excitement Engine** (NEXT: Dazed state + slow-mo `[E]` Executions, Live Crowd Favor & `T` Taunt, Procedural Web Audio drums/steel/crowd).
 - [x] **Standalone Mac App (`BONEYARD.app` & `.dmg`)** — Built via Tauri (`src-tauri/Cargo.toml` `[profile.release.build-override] strip = false`).
-- [ ] **Phase E — Named Rivals & Live Training Yard**.
+- [ ] **Phase E — Live Training Yard Sparring**.
 
 ## Code map (src/game)
-- `world/` layout + collider math (pure, tested) · `Ludus.tsx`, `Stations.tsx`, `Gladiator.tsx` (low-poly PS1 polygon rig + modular armor/cape/weapons + limp/snare/glint visuals)
-- `arena/styles.ts` 5 gladiator styles (`murmillo`, `dimachaerus`, `executioner`, `retiarius`, `hoplomachus`) · `arena/combat.ts` pure combat rules, combos, guard-break, breakable armor, net snare, 6-zone limb damage, AI (tested)
+- `rpg/` `items.ts` (13 weapons, 6 offhands, 6 helms, 5 bodies, 4 capes, `resolveLoadout`, `gearFromStyle`) · `stats.ts` (5 stats, XP leveling, Fame ranks, consumables, `buildPlayerMods`) · `quests.ts` (daily bounties, bout telemetry tracker, 4 daily Fight Cards)
+- `world/` layout (`BOUNDS` `-48..48` x `-64..44`, 9 stations) + collider math (pure, tested) · `Ludus.tsx` (Roman Town plaza, buildings, cypresses, morning/dusk lights, NPCs, showcase camera), `Stations.tsx`, `Gladiator.tsx` (modular low-poly PS1 rig + `civilian` mode)
+- `arena/styles.ts` 5 weapon moveset blueprints · `arena/combat.ts` pure combat rules, combos, guard-break, breakable armor, net snare, 6-zone limb damage, `gearOf`, `drinkFlask`, AI (tested)
 - `arena/ragdoll.ts` + `physics.ts` Rapier partial ragdoll + `SeveredPiece` limb/armor/weapon debris (tested: 50 kills + 40 mixed pieces stable)
 - `arena/effects.tsx` `ShardPool`, `SlashPool`/`SlashRibbons`, `GhostPool`/`DashGhosts`
-- `arena/boons.ts` + `arena/run.ts` 12 Fate boons, 5-bout ladder (`boutRosterFor`), crest looks
-- `arena/arenaStore.ts` HUD state (`playerLimbs`, `styleName`, enemy `limbs`, locked target, combo, callouts) · `Arena.tsx` Colosseum scene + sim loop
-- `art/` `ps1Textures.ts` Bayer-dithered textures, `Ps1Display.tsx` low-res CRT buffer & overlay, `Ps1Sky.tsx` sky dome & `Brazier`, `ClassicalColumns.tsx`, `StaticBatch.tsx`, `Starfield.tsx`, `SurrealSpores.tsx`
-- `store.ts` zustand + localStorage save (`boneyard.save.v1`, `style`, `look`, `ps1Mode`)
+- `arena/boons.ts` + `arena/run.ts` 12 Fate boons, legacy 5-bout ladder (`?arena`), crest looks
+- `arena/arenaStore.ts` HUD state (`playerLimbs`, `enemies`, locked target, combo, callouts) · `Arena.tsx` Colosseum scene, Fight Cards, `[H]` flask, sim loop & career settle
+- `art/` `ps1Textures.ts` Bayer-dithered textures (`roof`, `plaster`, `cobble`, etc.), `Ps1Display.tsx` low-res CRT buffer & overlay, `Ps1Sky.tsx` sky domes (`town_morning`, `town_dusk`, `arena`) & `Brazier`, `ClassicalColumns.tsx`, `StaticBatch.tsx`, `Starfield.tsx`, `SurrealSpores.tsx`
+- `store.ts` zustand + localStorage career save (`boneyard.save.v2` with `v1` migration)
 
 ## Known issues / honest notes
-- Save is plain localStorage (`boneyard.save.v1`).
-- Training Yard is a placeholder until Phase E (Armory now equips both Fighting Styles and Cosmetic Crest Colors).
+- Save is plain localStorage (`boneyard.save.v2`; automatically imports prior `boneyard.save.v1` saves).
+- Training Yard offers a once-per-day drill (`+35 XP`) and quick stat upgrades until live dummy sparring arrives.
 - Only external runtime dependency beyond R3F/Three/Zustand: `@dimforge/rapier3d-compat` (CSP has `wasm-unsafe-eval`).

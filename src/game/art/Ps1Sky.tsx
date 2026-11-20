@@ -3,15 +3,21 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getPs1Texture, makePs1Material } from './ps1Textures';
 
-/** Quantized low-poly PS1 sky dome with vertex-colored twilight bands, faceted moon, and distant horizon ruins. */
-export function Ps1Sky({ mood = 'ludus' }: { mood?: 'ludus' | 'arena' }) {
+export type SkyMood = 'ludus' | 'arena' | 'town_morning' | 'town_dusk';
+
+/** Quantized low-poly PS1 sky dome with vertex-colored twilight bands, faceted celestial body, and distant horizon ruins. */
+export function Ps1Sky({ mood = 'ludus' }: { mood?: SkyMood }) {
   const skyGeo = useMemo(() => {
     const geo = new THREE.SphereGeometry(280, 18, 10);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
-    const zenith = new THREE.Color('#080614');
-    const mid = new THREE.Color(mood === 'arena' ? '#211132' : '#181332');
-    const horizon = new THREE.Color(mood === 'arena' ? '#5a2b2c' : '#2f204e');
+    const zenith = new THREE.Color(mood === 'town_morning' ? '#1b254a' : mood === 'town_dusk' ? '#0b081a' : '#080614');
+    const mid = new THREE.Color(
+      mood === 'town_morning' ? '#49588a' : mood === 'town_dusk' ? '#2c1642' : mood === 'arena' ? '#211132' : '#181332',
+    );
+    const horizon = new THREE.Color(
+      mood === 'town_morning' ? '#c2845e' : mood === 'town_dusk' ? '#7a3438' : mood === 'arena' ? '#5a2b2c' : '#2f204e',
+    );
     const tmp = new THREE.Color();
 
     for (let i = 0; i < pos.count; i++) {
@@ -28,6 +34,11 @@ export function Ps1Sky({ mood = 'ludus' }: { mood?: 'ludus' | 'arena' }) {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     return geo;
   }, [mood]);
+
+  const silColor = mood === 'town_morning' ? '#2d2136' : mood === 'town_dusk' ? '#1d1024' : mood === 'arena' ? '#170c1c' : '#110c24';
+  const templeColor = mood === 'town_morning' ? '#3d2a3f' : mood === 'town_dusk' ? '#27142c' : mood === 'arena' ? '#1f1022' : '#171030';
+  const moonColor = mood === 'town_morning' ? '#ffe9a6' : mood === 'arena' || mood === 'town_dusk' ? '#ffe0b8' : '#f4ecd2';
+  const haloColor = mood === 'town_morning' || mood === 'arena' ? '#ffc95c' : '#a78bfa';
 
   const aqueducts = useMemo(() => {
     const items: { x: number; z: number; ry: number; h: number; temple: boolean }[] = [];
@@ -52,15 +63,15 @@ export function Ps1Sky({ mood = 'ludus' }: { mood?: 'ludus' | 'arena' }) {
         <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} />
       </mesh>
 
-      {/* Low-poly PS1 Moon */}
-      <group position={[-45, 92, -175]}>
+      {/* Low-poly PS1 Celestial Disc */}
+      <group position={mood === 'town_morning' ? [58, 78, -165] : [-45, 92, -175]}>
         <mesh>
           <dodecahedronGeometry args={[11, 0]} />
-          <meshBasicMaterial color={mood === 'arena' ? '#ffe0b8' : '#f4ecd2'} fog={false} />
+          <meshBasicMaterial color={moonColor} fog={false} />
         </mesh>
         <mesh rotation={[0.2, 0.3, 0]}>
           <ringGeometry args={[13.5, 16.5, 10]} />
-          <meshBasicMaterial color={mood === 'arena' ? '#ffc95c' : '#a78bfa'} transparent opacity={0.18} side={THREE.DoubleSide} fog={false} />
+          <meshBasicMaterial color={haloColor} transparent opacity={0.18} side={THREE.DoubleSide} fog={false} />
         </mesh>
       </group>
 
@@ -70,12 +81,12 @@ export function Ps1Sky({ mood = 'ludus' }: { mood?: 'ludus' | 'arena' }) {
           <group key={i} position={[s.x, 0, s.z]} rotation={[0, s.ry, 0]}>
             <mesh position={[0, s.h / 2, 0]}>
               <boxGeometry args={[22, s.h, 5]} />
-              <meshBasicMaterial color={mood === 'arena' ? '#170c1c' : '#110c24'} />
+              <meshBasicMaterial color={silColor} />
             </mesh>
             {s.temple && (
               <mesh position={[0, s.h + 4, 0]} rotation={[0, Math.PI / 4, 0]}>
                 <coneGeometry args={[14, 8, 4]} />
-                <meshBasicMaterial color={mood === 'arena' ? '#1f1022' : '#171030'} />
+                <meshBasicMaterial color={templeColor} />
               </mesh>
             )}
           </group>

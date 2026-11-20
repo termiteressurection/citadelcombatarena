@@ -9,7 +9,10 @@ export type Ps1TexKind =
   | 'banner'
   | 'wood'
   | 'water'
-  | 'rune';
+  | 'rune'
+  | 'roof'
+  | 'plaster'
+  | 'cobble';
 
 const BAYER4 = [
   0, 8, 2, 10,
@@ -193,6 +196,43 @@ function createTexture(kind: Ps1TexKind): THREE.CanvasTexture | null {
           if (crack) return [24, 18, 34];
           const pick = bayerPick(x, y, 0.35 + hash2(x, y, 501) * 0.45);
           return pick ? [74, 66, 92] : [52, 46, 68];
+        });
+      });
+
+    case 'roof':
+      return buildCanvas(32, 32, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          const ridge = x % 8;
+          const overlap = y % 8 === 0;
+          if (overlap || ridge === 0) return [84, 32, 22];
+          if (ridge === 1) return [178, 86, 52];
+          const n = hash2(x, y, 711);
+          return bayerPick(x, y, 0.35 + (ridge / 8) * 0.35 + n * 0.25) ? [154, 66, 38] : [122, 48, 28];
+        });
+      });
+
+    case 'plaster':
+      return buildCanvas(64, 64, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          const timber = x < 4 || x >= w - 4 || y < 5 || y >= h - 5;
+          if (timber) return [72, 46, 28];
+          const speck = hash2(x, y, 277);
+          const pick = bayerPick(x, y, 0.4 + speck * 0.35);
+          return pick ? [196, 174, 146] : [164, 142, 118];
+        });
+      });
+
+    case 'cobble':
+      return buildCanvas(64, 64, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          const row = Math.floor(y / 12);
+          const ox = (row % 2) * 8;
+          const bx = (x + ox) % 16;
+          const by = y % 12;
+          if (bx === 0 || by === 0) return [32, 24, 38];
+          if (bx === 1 || by === 1) return [124, 108, 122];
+          const shade = hash2(row, Math.floor((x + ox) / 16), 901);
+          return bayerPick(x, y, 0.3 + shade * 0.4 + hash2(x, y, 19) * 0.2) ? [98, 84, 96] : [76, 64, 78];
         });
       });
   }

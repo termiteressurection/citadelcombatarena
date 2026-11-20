@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Atk } from './combat';
-import { moveOf, type StyleId } from './styles';
+import { moveOf, type MoveMotion, type StyleId } from './styles';
 
 interface Shard { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number; color: THREE.Color }
 
@@ -63,6 +63,7 @@ interface SlashSlot {
   yaw: number;
   kind: SlashKind;
   style: StyleId;
+  motion?: MoveMotion;
   color: THREE.Color;
   life: number;
   max: number;
@@ -75,7 +76,7 @@ export class SlashPool {
     active: false, x: 0, y: 1.25, z: 0, yaw: 0, kind: 'light', style: 'murmillo', color: new THREE.Color('#ffffff'), life: 0, max: 0.18,
   }));
 
-  spawn(x: number, z: number, yaw: number, kind: SlashKind, color: string, style: StyleId = 'murmillo'): void {
+  spawn(x: number, z: number, yaw: number, kind: SlashKind, color: string, style: StyleId = 'murmillo', motion?: MoveMotion): void {
     let slot = this.slots.find((s) => !s.active);
     if (!slot) {
       slot = this.slots.reduce((a, b) => (a.life / a.max > b.life / b.max ? a : b));
@@ -87,6 +88,7 @@ export class SlashPool {
     slot.yaw = yaw;
     slot.kind = kind;
     slot.style = style;
+    slot.motion = motion;
     slot.color.set(color);
     slot.life = 0;
     slot.max = kind === 'heavy' || kind === 'light3' ? 0.24 : kind === 'parry' ? 0.28 : 0.18;
@@ -144,7 +146,7 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
       mat.color.copy(s.color);
       mat.opacity = (1 - p) * (1 - p) * 0.92;
 
-      const motion = s.kind === 'parry' ? 'parry' : moveOf(s.style, s.kind).motion;
+      const motion = s.kind === 'parry' ? 'parry' : s.motion ?? moveOf(s.style, s.kind).motion;
       if (motion === 'bash' || motion === 'parry' || motion === 'netThrow') {
         arc.visible = false;
         lance.visible = false;

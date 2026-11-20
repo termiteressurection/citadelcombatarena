@@ -6,7 +6,7 @@ import { Brazier, Ps1Sky } from './art/Ps1Sky';
 import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import Starfield from './art/Starfield';
 import {
-  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, defaultMods, makeFighter, parryWindowOf, resolveStrike, stepFighter, windupOf,
+  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, defaultMods, drinkFlask, gearOf, makeFighter, parryWindowOf, resolveStrike, stepFighter, windupOf,
   type Fighter, type HitEvent, type Intent, type LimbKey,
 } from './arena/combat';
 import { ARENA_RADIUS, createArenaWorld, initPhysics, RAPIER } from './arena/physics';
@@ -16,6 +16,9 @@ import { fullLimbHud, toLimbHud, useArena, type LimbHud } from './arena/arenaSto
 import { drawBoons, modsFor } from './arena/boons';
 import { CHAMPION_BONUS, boutRosterFor, carryHp, gloryForBout, isFinalBout, lookColor, type BoutEnemy } from './arena/run';
 import { STYLE_IDS, styleOf, type ArmorKey, type StyleId } from './arena/styles';
+import { gearFromStyle, itemById, resolveLoadout, WEAPONS, type WeaponFamily } from './rpg/items';
+import { buildPlayerMods } from './rpg/stats';
+import type { FightCard } from './rpg/quests';
 import { keys, pressed } from './input';
 import { useGame } from './store';
 
@@ -54,27 +57,65 @@ interface ArenaWorld {
   lockedId: number | null;
   calloutId: number;
   settled: boolean;
+  card: FightCard | null;
+  kills: number;
+  parries: number;
+  armorsBroken: number;
+  limbsSevered: number;
+  usedFlask: boolean;
+  weaponFamily: WeaponFamily;
 }
 
-function resolvePlayerStyle(saved: StyleId): StyleId {
-  if (typeof location === 'undefined') return saved;
+function resolveQueryStyle(): StyleId | null {
+  if (typeof location === 'undefined') return null;
   const p = new URLSearchParams(location.search).get('style');
-  return p && (STYLE_IDS as readonly string[]).includes(p) ? (p as StyleId) : saved;
+  return p && (STYLE_IDS as readonly string[]).includes(p) ? (p as StyleId) : null;
 }
 
-function newWorld(bout: number, roster: BoutEnemy[], boons: string[], carry: number, carryMax: number, look: string, playerStyle: StyleId): ArenaWorld {
-  const mods = modsFor(boons);
-  const player = makeFighter(0, 'player', 0, 8, mods, playerStyle);
-  player.stats = { ...player.stats, color: lookColor(look) };
+const STYLE_FAMILY: Record<StyleId, WeaponFamily> = {
+  murmillo: 'gladius',
+  dimachaerus: 'twinSica',
+  executioner: 'warhammer',
+  retiarius: 'trident',
+  hoplomachus: 'spear',
+};
+
+function newWorld(
+  bout: number,
+  card: FightCard | null,
+  roster: BoutEnemy[],
+  boons: string[],
+  carry: number,
+  carryMax: number,
+  gs: ReturnType<typeof useGame.getState>,
+): ArenaWorld {
+  const queryStyle = resolveQueryStyle();
+  const playerGear = queryStyle ? gearFromStyle(queryStyle) : resolveLoadout(gs.loadout);
+  const weaponFamily = queryStyle ? STYLE_FAMILY[queryStyle] : itemById(WEAPONS, gs.loadout.weaponId).family;
+  const mods = buildPlayerMods(gs.stats, playerGear, gs.dailyBuffs, modsFor(boons));
+  const player = makeFighter(0, 'player', 0, 8, mods, queryStyle ?? gs.style, playerGear);
+  player.stats = { ...player.stats, color: lookColor(gs.look) };
   if (carry > 0) player.hp = Math.min(player.maxHp, carry + Math.max(0, player.maxHp - carryMax));
   const fighters = [player];
-  roster.forEach((item, i) => {
-    const e = makeFighter(i + 1, item.kind, (i - (roster.length - 1) / 2) * 4, -8, defaultMods(), item.style);
-    e.stats = { ...e.stats, color: styleOf(item.style).color };
-    fighters.push(e);
-  });
+
+  if (card) {
+    card.enemies.forEach((item, i) => {
+      const eGear = item.loadout ? resolveLoadout(item.loadout) : gearFromStyle(item.style);
+      const e = makeFighter(i + 1, item.kind, (i - (card.enemies.length - 1) / 2) * 4, -8, defaultMods(), item.style, eGear);
+      e.stats = { ...e.stats, name: item.name, color: eGear.color };
+      fighters.push(e);
+    });
+  } else {
+    roster.forEach((item, i) => {
+      const e = makeFighter(i + 1, item.kind, (i - (roster.length - 1) / 2) * 4, -8, defaultMods(), item.style);
+      e.stats = { ...e.stats, color: styleOf(item.style).color };
+      fighters.push(e);
+    });
+  }
+
   return {
-    bout, freed: false,
+    bout, freed: false, card,
+    kills: 0, parries: 0, armorsBroken: 0, limbsSevered: 0, usedFlask: false, weaponFamily,
     phys: createArenaWorld(), fighters, ragdolls: [], debris: [],
     shards: new ShardPool(), slashes: new SlashPool(), ghosts: new GhostPool(),
     hitstop: 0, shake: 0, fovKick: 0, time: 0, acc: 0,
@@ -103,6 +144,7 @@ function onHit(w: ArenaWorld, e: HitEvent) {
   const a = w.fighters.find((f) => f.id === e.attacker)!;
   const y = 1.3;
   if (e.type === 'parry') {
+    if (v.team === 'p') w.parries++;
     w.hitstop = Math.max(w.hitstop, 0.18); w.shake = Math.max(w.shake, 0.6); w.fovKick = -8;
     w.shards.burst(e.x, y, e.z, 32, 10, '#ffc95c');
     w.slashes.spawn(e.x, e.z, 0, 'parry', '#ffc95c');
@@ -123,6 +165,7 @@ function onHit(w: ArenaWorld, e: HitEvent) {
 
   // Shattered armor debris & Retiarius net snare
   if (e.armorBroken) {
+    if (v.team === 'e') w.armorsBroken++;
     w.debris.push(new SeveredPiece(w.phys, {
       kind: e.armorBroken, style: v.style, x: v.x, z: v.z, yaw: v.yaw,
       hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy ? 12 : 8, color: v.stats.color,
@@ -140,6 +183,7 @@ function onHit(w: ArenaWorld, e: HitEvent) {
 
   // Severed limb debris
   if (e.severed) {
+    if (v.team === 'e') w.limbsSevered++;
     w.debris.push(new SeveredPiece(w.phys, {
       kind: e.severed, style: v.style, x: v.x, z: v.z, yaw: v.yaw,
       hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy || e.decap ? 14 : 9, color: v.stats.color,
@@ -181,6 +225,7 @@ function onHit(w: ArenaWorld, e: HitEvent) {
     }
     w.shards.burst(v.x, y, v.z, e.heavy || fin ? 24 : 12, e.heavy || fin ? 8.5 : 5, v.stats.color, e.dx, e.dz);
   } else {
+    if (v.team === 'e') w.kills++;
     if (a.team === 'p' && a.state !== 'dead') a.hp = Math.min(a.maxHp, a.hp + a.mods.healOnKill);
     w.hitstop = Math.max(w.hitstop, 0.22); w.shake = Math.max(w.shake, 0.9); w.fovKick = Math.min(w.fovKick, -6);
     w.shards.burst(v.x, y, v.z, 34, 10.5, v.stats.color, e.dx, e.dz);
@@ -246,6 +291,16 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
 
   const player = w.fighters[0];
   const liveFoes = w.fighters.filter((f) => f.team === 'e' && f.state !== 'dead');
+
+  if (fighting && player.state !== 'dead' && pressed('KeyH')) {
+    const gs = useGame.getState();
+    if (gs.flasks > 0 && drinkFlask(player)) {
+      gs.consumeFlaskInBout();
+      w.usedFlask = true;
+      w.shards.burst(player.x, 1.35, player.z, 26, 8, '#4dffa0');
+      hud.set({ callout: { text: 'FLASK! +HP', color: '#4dffa0', id: ++w.calloutId } });
+    }
+  }
 
   // Lock-On toggle / cycle target via Tab
   if (pressed('Tab')) {
@@ -318,8 +373,10 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     }
 
     if (strike && f.atk) {
-      const slashColor = f.atk === 'light3' ? '#ffc95c' : f.style === 'retiarius' && f.atk === 'heavy' ? '#3ff0ff' : f.team === 'p' ? f.stats.color : '#ff4f6d';
-      w.slashes.spawn(f.x, f.z, f.yaw, f.atk, slashColor, f.style);
+      const fg = gearOf(f);
+      const motion = fg.moves[f.atk].motion;
+      const slashColor = f.atk === 'light3' ? '#ffc95c' : motion === 'netThrow' ? '#3ff0ff' : f.team === 'p' ? f.stats.color : '#ff4f6d';
+      w.slashes.spawn(f.x, f.z, f.yaw, f.atk, slashColor, f.style, motion);
       for (const e of resolveStrike(f, w.fighters)) onHit(w, e);
     }
   }
@@ -345,7 +402,7 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
   const limbPose = useRef<LimbPose>(makeLimbPose());
   const armorPose = useRef<Record<ArmorKey, boolean>>({ helm: true, pauldron: true, shield: true });
   const f = w.fighters[index];
-  const stDef = styleOf(f.style);
+  const fg = gearOf(f);
   useFrame(() => {
     const h = g.current;
     if (!h) return;
@@ -365,7 +422,7 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     } else if (at && f.state === 'strike') {
       progress = Math.min(1, f.t / at.strike);
     } else if (at && f.state === 'recover') {
-      progress = Math.min(1, f.t / (at.recover * stDef.recoverMul));
+      progress = Math.min(1, f.t / (at.recover * fg.recoverMul));
     } else if (f.state === 'dodge') {
       progress = Math.min(1, f.t / DODGE_TIME);
     } else if (f.state === 'stagger') {
@@ -373,6 +430,7 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     }
     p.state = f.state;
     p.atk = f.atk;
+    p.motion = f.atk ? fg.moves[f.atk].motion : undefined;
     p.progress = progress;
     p.telegraph = tele;
     p.parryFlash = parryFlash;
@@ -396,15 +454,15 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     p.armor = armorPose.current;
     p.snared = f.snared;
     const sp = Math.hypot(f.vx, f.vz);
-    h.setMoving(f.state === 'dodge' ? 1 : Math.min(1, sp / (f.stats.speed * stDef.speedMul)));
+    h.setMoving(f.state === 'dodge' ? 1 : Math.min(1, sp / (f.stats.speed * fg.speedMul)));
   });
   return (
     <Gladiator
       ref={g}
-      style={f.style}
+      gear={fg.visuals}
       color={f.stats.color}
       accent={f.team === 'p' ? '#ffc95c' : '#e9e6ff'}
-      scale={f.kind === 'brute' ? 1.24 : f.kind === 'champion' ? 1.15 : stDef.scale}
+      scale={f.kind === 'brute' ? 1.24 : f.kind === 'champion' ? 1.15 : fg.scale}
     />
   );
 }
@@ -873,7 +931,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
     const playerLimbs = toLimbHud(p.limbs);
     const samePlayerLimbs = sameLimbHud(playerLimbs, hud.playerLimbs);
     const enemies = w.fighters.filter((f) => f.team === 'e').map((f) => ({
-      id: f.id, name: f.stats.name, styleName: styleOf(f.style).name, hp: Math.ceil(f.hp), max: f.maxHp, limbs: toLimbHud(f.limbs),
+      id: f.id, name: f.stats.name, styleName: gearOf(f).name, hp: Math.ceil(f.hp), max: f.maxHp, limbs: toLimbHud(f.limbs),
     }));
     const sameEnemies = enemies.length === hud.enemies.length && enemies.every((e, i) =>
       e.hp === hud.enemies[i].hp && sameLimbHud(e.limbs, hud.enemies[i].limbs),
@@ -897,15 +955,36 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
     if (resultLive && !w.settled) {
       w.settled = true;
       const game = useGame.getState();
-      const mul = p.mods.glory;
-      if (w.phase === 'victory') {
-        const earned = gloryForBout(bout, mul) + (isFinalBout(bout) ? Math.round(CHAMPION_BONUS * mul) : 0);
-        game.addGlory(earned);
-        if (isFinalBout(bout)) { game.recordChampion(); hud.set({ phase: 'champion', earned, enemies: [], callout: null }); }
-        else hud.set({ phase: 'draft', earned, enemies: [], draft: drawBoons().map((b) => b.id), carryHp: carryHp(p.hp, p.maxHp), carryMax: p.maxHp, callout: null });
+      const slayer = w.fighters.find((x) => x.team === 'e' && x.state !== 'dead')?.stats.name ?? 'the sand';
+      if (w.card) {
+        const outcome = game.settleBout({
+          victory: w.phase === 'victory',
+          kills: w.kills,
+          parries: w.parries,
+          armorsBroken: w.armorsBroken,
+          limbsSevered: w.limbsSevered,
+          usedFlask: w.usedFlask,
+          weaponFamily: w.weaponFamily,
+          card: w.card,
+          cause: w.phase === 'defeat' ? `felled by ${slayer}` : undefined,
+        });
+        hud.set({
+          phase: w.phase === 'victory' ? (w.card.tier === 4 ? 'champion' : 'victory') : 'defeat',
+          earned: outcome.fameDelta,
+          enemies: [],
+          callout: null,
+        });
       } else {
-        game.recordDeath({ name: 'A nameless gladiator', bouts: bout, cause: `slain by ${w.fighters.find((x) => x.team === 'e' && x.state !== 'dead')?.stats.name ?? 'the sand'}`, date: new Date().toISOString().slice(0, 10) });
-        hud.set({ phase: 'defeat', enemies: [], callout: null });
+        const mul = p.mods.glory;
+        if (w.phase === 'victory') {
+          const earned = gloryForBout(bout, mul) + (isFinalBout(bout) ? Math.round(CHAMPION_BONUS * mul) : 0);
+          game.addGlory(earned);
+          if (isFinalBout(bout)) { game.recordChampion(); hud.set({ phase: 'champion', earned, enemies: [], callout: null }); }
+          else hud.set({ phase: 'draft', earned, enemies: [], draft: drawBoons().map((b) => b.id), carryHp: carryHp(p.hp, p.maxHp), carryMax: p.maxHp, callout: null });
+        } else {
+          game.recordDeath({ name: 'A nameless gladiator', bouts: bout, cause: `slain by ${slayer}`, date: new Date().toISOString().slice(0, 10) });
+          hud.set({ phase: 'defeat', enemies: [], callout: null });
+        }
       }
     }
 
@@ -987,6 +1066,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
 
 export function Arena() {
   const bout = useArena((s) => s.bout);
+  const cardId = useGame((s) => s.selectedCard?.id ?? null);
   const [world, setWorld] = useState<ArenaWorld | null>(null);
   useEffect(() => {
     let dead = false;
@@ -995,12 +1075,13 @@ export function Arena() {
       if (dead) return;
       const a = useArena.getState();
       const gs = useGame.getState();
-      local = newWorld(bout, boutRosterFor(bout), a.boons, a.carryHp, a.carryMax, gs.look, resolvePlayerStyle(gs.style));
+      local = newWorld(bout, gs.selectedCard, boutRosterFor(bout), a.boons, a.carryHp, a.carryMax, gs);
       a.set({
         phase: 'intro',
         hp: local.fighters[0].hp,
         maxHp: local.fighters[0].maxHp,
-        st: 100,
+        st: local.fighters[0].maxStamina,
+        maxSt: local.fighters[0].maxStamina,
         playerLimbs: fullLimbHud(),
         enemies: [],
         lockedName: local.fighters[1]?.stats.name ?? null,
@@ -1018,7 +1099,7 @@ export function Arena() {
       }
       setWorld(null);
     };
-  }, [bout]);
+  }, [bout, cardId]);
   if (!world || world.freed || world.bout !== bout) return null;
-  return <Scene key={world.bout} w={world} bout={world.bout} />;
+  return <Scene key={`${world.bout}-${cardId ?? 'run'}`} w={world} bout={world.bout} />;
 }
