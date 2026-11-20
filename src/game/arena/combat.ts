@@ -33,6 +33,15 @@ export const DODGE_COST = 20;
 export const PARRY_WINDOW = 0.18;
 export const BLOCK_ARC = (70 * Math.PI) / 180;
 
+export interface Mods {
+  dmg: number; heavyDmg: number; stamRegen: number; speed: number; healOnKill: number; thorns: number;
+  parryWindow: number; dodgeCost: number; blockStam: number; maxHp: number; maxStamina: number; glory: number;
+}
+export const defaultMods = (): Mods => ({
+  dmg: 1, heavyDmg: 1, stamRegen: 1, speed: 1, healOnKill: 0, thorns: 0, parryWindow: 0, dodgeCost: 0, blockStam: 0, maxHp: 0, maxStamina: 0, glory: 1,
+});
+export const dodgeCostOf = (f: Fighter) => Math.max(4, DODGE_COST - f.mods.dodgeCost);
+
 export interface Fighter {
   id: number; kind: Kind; team: 'p' | 'e'; stats: Stats;
   x: number; z: number; vx: number; vz: number; yaw: number;
@@ -40,7 +49,7 @@ export interface Fighter {
   state: State; atk: Atk | null; t: number; stagger: number;
   blocking: boolean; blockT: number; iframes: number;
   dodgeX: number; dodgeZ: number; kx: number; kz: number;
-  dmgBonus: number;
+  mods: Mods;
   ai: { mode: 'circle' | 'approach' | 'retreat'; timer: number; strafe: 1 | -1; next: number; wantAttack: Atk | null };
 }
 
@@ -50,13 +59,13 @@ export const NO_INTENT: Intent = { moveX: 0, moveZ: 0, light: false, heavy: fals
 export type HitType = 'hit' | 'block' | 'parry' | 'kill';
 export interface HitEvent { type: HitType; attacker: number; victim: number; dmg: number; heavy: boolean; dx: number; dz: number; x: number; z: number }
 
-export function makeFighter(id: number, kind: Kind, x: number, z: number): Fighter {
+export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: Mods = defaultMods()): Fighter {
   const stats = KINDS[kind];
   return {
     id, kind, team: kind === 'player' ? 'p' : 'e', stats, x, z, vx: 0, vz: 0, yaw: 0,
-    hp: stats.hp, maxHp: stats.hp, stamina: stats.stamina, maxStamina: stats.stamina, staminaDelay: 0,
+    hp: stats.hp + mods.maxHp, maxHp: stats.hp + mods.maxHp, stamina: stats.stamina + mods.maxStamina, maxStamina: stats.stamina + mods.maxStamina, staminaDelay: 0,
     state: 'idle', atk: null, t: 0, stagger: 0, blocking: false, blockT: 0, iframes: 0,
-    dodgeX: 0, dodgeZ: 0, kx: 0, kz: 0, dmgBonus: 1,
+    dodgeX: 0, dodgeZ: 0, kx: 0, kz: 0, mods,
     ai: { mode: 'approach', timer: 0, strafe: Math.random() < 0.5 ? 1 : -1, next: 1 + Math.random(), wantAttack: null },
   };
 }
@@ -83,7 +92,7 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   let strikeFrame = false;
   f.iframes = Math.max(0, f.iframes - dt);
   f.staminaDelay = Math.max(0, f.staminaDelay - dt);
-  if (f.staminaDelay === 0) f.stamina = Math.min(f.maxStamina, f.stamina + (f.blocking ? 11 : 22) * dt);
+  if (f.staminaDelay === 0) f.stamina = Math.min(f.maxStamina, f.stamina + (f.blocking ? 11 : 22) * f.mods.stamRegen * dt);
   f.t += dt;
   const k = Math.exp(-9 * dt);
   f.kx *= k; f.kz *= k;
@@ -117,11 +126,11 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
       if (wantBlock && !f.blocking) f.blockT = 0;
       f.blocking = wantBlock;
       if (f.blocking) f.blockT += dt;
-      if (i.dodge && f.stamina >= DODGE_COST) {
+      if (i.dodge && f.stamina >= dodgeCostOf(f)) {
         const len = Math.hypot(i.moveX, i.moveZ);
         f.dodgeX = len > 0.1 ? i.moveX / len : -Math.sin(f.yaw);
         f.dodgeZ = len > 0.1 ? i.moveZ / len : -Math.cos(f.yaw);
-        f.stamina -= DODGE_COST; f.staminaDelay = 0.6;
+        f.stamina -= dodgeCostOf(f); f.staminaDelay = 0.6;
         f.state = 'dodge'; f.t = 0; f.iframes = DODGE_IFRAMES; f.blocking = false;
       } else if (!f.blocking && i.heavy) startAttack(f, 'heavy');
       else if (!f.blocking && i.light) startAttack(f, 'light');
@@ -131,7 +140,7 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   }
   if (f.state !== 'dodge') {
     const len = Math.hypot(i.moveX, i.moveZ) || 1;
-    const sp = f.stats.speed * speedMul * Math.min(1, Math.hypot(i.moveX, i.moveZ));
+    const sp = f.stats.speed * f.mods.speed * speedMul * Math.min(1, Math.hypot(i.moveX, i.moveZ));
     const tx = (i.moveX / len) * sp, tz = (i.moveZ / len) * sp;
     const a = 1 - Math.exp(-14 * dt);
     f.vx += (tx - f.vx) * a; f.vz += (tz - f.vz) * a;
@@ -153,21 +162,22 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
     const ang = Math.atan2(dx, dz) - a.yaw;
     if (Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) > at.half) continue;
     const ux = dx / d, uz = dz / d;
-    const dmg = at.dmg * a.stats.dmgMul * a.dmgBonus;
+    const dmg = at.dmg * a.stats.dmgMul * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1);
     const base = { attacker: a.id, victim: v.id, heavy, dx: ux, dz: uz, x: (a.x + v.x) / 2, z: (a.z + v.z) / 2 };
 
     // blocking: shield must face the attacker
     const faceAng = Math.atan2(-dx, -dz) - v.yaw;
     const facing = Math.abs(Math.atan2(Math.sin(faceAng), Math.cos(faceAng))) <= BLOCK_ARC;
     if (v.blocking && v.state === 'idle' && facing) {
-      if (v.blockT <= PARRY_WINDOW) {
+      if (v.blockT <= PARRY_WINDOW + v.mods.parryWindow) {
         stagger(a, 0.9);
         v.stamina = Math.min(v.maxStamina, v.stamina + 15);
         out.push({ ...base, type: 'parry', dmg: 0 });
       } else {
         const chip = dmg * 0.15;
         v.hp = Math.max(1, v.hp - chip);
-        v.stamina -= dmg * 0.9; v.staminaDelay = 1;
+        v.stamina -= dmg * 0.9 * (1 - v.mods.blockStam); v.staminaDelay = 1;
+        if (v.mods.thorns > 0) a.hp = Math.max(1, a.hp - v.mods.thorns);
         v.kx += ux * at.knock * 0.3; v.kz += uz * at.knock * 0.3;
         if (v.stamina <= 0) { v.stamina = 0; stagger(v, 0.7); }
         out.push({ ...base, type: 'block', dmg: chip });
@@ -198,7 +208,7 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number): Intent {
   ai.timer += dt;
 
   // read the player's windup and sometimes dodge it
-  if (cfg.dodgeChance > 0 && target.state === 'windup' && d < 3.4 && f.stamina >= DODGE_COST && Math.random() < cfg.dodgeChance * dt * 6) {
+  if (cfg.dodgeChance > 0 && target.state === 'windup' && d < 3.4 && f.stamina >= dodgeCostOf(f) && Math.random() < cfg.dodgeChance * dt * 6) {
     it.dodge = true; it.moveX = -fz * ai.strafe; it.moveZ = fx * ai.strafe; return it;
   }
 

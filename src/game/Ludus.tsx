@@ -11,11 +11,21 @@ import { CorinthianColumn, DoricColumn, IonicColumn } from './art/ClassicalColum
 import { ACCENTS } from './art/palette';
 import { BASIN, BOUNDS, COLUMNS, PLAYER_START, SOLIDS, nearestStation } from './world/layout';
 import { clampBounds, isFree, resolveCircles } from './world/colliders';
-import { drag, keys, pressed } from './input';
+import { keys, pressed } from './input';
+import { lookColor } from './arena/run';
 import { useGame } from './store';
 
 const PLAYER_R = 0.55;
-const SPEED = 7.2;
+// Citadel camera rig, constants carried over exactly
+const MOVE_SPEED = 0.27 * 60; // 0.27 units per frame at 60 fps
+const KB_YAW_SENS = 0.06;
+const CAMERA_SOCKET_DISTANCE = 5.2;
+const CAMERA_SOCKET_HEIGHT = 3.35;
+const CAMERA_LOOK_AHEAD = 8.8;
+const CAMERA_LOOK_HEIGHT = 1.55;
+const CAMERA_MOVE_LEAD = 0.9;
+const CAMERA_LERP = 0.18;
+const EYE_Y = 1.6; // the Citadel's player height; the rig hangs off it
 
 type PosRef = React.MutableRefObject<THREE.Vector3>;
 
@@ -94,7 +104,13 @@ function Court() {
 function Player({ playerPos }: { playerPos: PosRef }) {
   const g = useRef<GladiatorHandle>(null!);
   const camera = useThree((s) => s.camera);
-  const st = useRef({ x: PLAYER_START.x, z: PLAYER_START.z, vx: 0, vz: 0, yaw: Math.PI, camYaw: 0, camLook: new THREE.Vector3() });
+  const look = useGame((s) => s.look);
+  const st = useRef({
+    x: PLAYER_START.x, z: PLAYER_START.z, vx: 0, vz: 0, face: Math.PI, yaw: 0, pitch: 0,
+    cam: new THREE.Vector3(PLAYER_START.x, EYE_Y + CAMERA_SOCKET_HEIGHT, PLAYER_START.z + CAMERA_SOCKET_DISTANCE),
+    lookAt: new THREE.Vector3(PLAYER_START.x, EYE_Y + CAMERA_LOOK_HEIGHT, PLAYER_START.z - CAMERA_LOOK_AHEAD),
+    dCam: new THREE.Vector3(), dLook: new THREE.Vector3(),
+  });
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -102,26 +118,29 @@ function Player({ playerPos }: { playerPos: PosRef }) {
     const game = useGame.getState();
     const frozen = game.panel !== null;
 
-    // camera orbit: drag or arrow keys
-    s.camYaw -= drag.dx * 0.006; drag.dx = 0;
-    if (keys.has('ArrowLeft')) s.camYaw += 1.8 * dt;
-    if (keys.has('ArrowRight')) s.camYaw -= 1.8 * dt;
+    if (frozen && (pressed('Escape') || pressed('Enter') || pressed('Space'))) game.openPanel(null);
 
-    let ix = 0, iz = 0;
+    // Q / E orbit, R / F pitch: the Citadel's camera keys
+    let orbit = 0;
+    if (keys.has('KeyQ')) orbit += 1;
+    if (keys.has('KeyE')) orbit -= 1;
+    if (orbit) s.yaw += orbit * KB_YAW_SENS * dt * 60;
+    let tilt = 0;
+    if (keys.has('KeyR')) tilt += 1;
+    if (keys.has('KeyF')) tilt -= 1;
+    if (tilt) s.pitch = Math.max(-1.3, Math.min(1.4, s.pitch + tilt * KB_YAW_SENS * dt * 60));
+
+    const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw);
+    const rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw);
+    let mx = 0, mz = 0;
     if (!frozen) {
-      if (keys.has('KeyW')) iz -= 1;
-      if (keys.has('KeyS')) iz += 1;
-      if (keys.has('KeyA')) ix -= 1;
-      if (keys.has('KeyD')) ix += 1;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) { mx += fx; mz += fz; }
+      if (keys.has('KeyS') || keys.has('ArrowDown')) { mx -= fx; mz -= fz; }
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) { mx -= rx; mz -= rz; }
+      if (keys.has('KeyD') || keys.has('ArrowRight')) { mx += rx; mz += rz; }
     }
-    const len = Math.hypot(ix, iz) || 1;
-    ix /= len; iz /= len;
-    const fx = -Math.sin(s.camYaw), fz = -Math.cos(s.camYaw);
-    const rx = Math.cos(s.camYaw), rz = -Math.sin(s.camYaw);
-    const tvx = (fx * -iz + rx * ix) * SPEED;
-    const tvz = (fz * -iz + rz * ix) * SPEED;
-    const k = 1 - Math.exp(-12 * dt);
-    s.vx += (tvx - s.vx) * k; s.vz += (tvz - s.vz) * k;
+    // Citadel movement is instant (no easing): speed is added straight to position
+    s.vx = mx * MOVE_SPEED; s.vz = mz * MOVE_SPEED;
 
     const p = { x: s.x + s.vx * dt, z: s.z + s.vz * dt };
     resolveCircles(p, PLAYER_R, SOLIDS);
@@ -129,29 +148,33 @@ function Player({ playerPos }: { playerPos: PosRef }) {
     s.x = p.x; s.z = p.z;
 
     const sp = Math.hypot(s.vx, s.vz);
-    if (sp > 0.4) {
-      const target = Math.atan2(s.vx, s.vz);
-      let d = target - s.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
-      s.yaw += d * (1 - Math.exp(-14 * dt));
-    }
+    const target = sp > 0.4 ? Math.atan2(s.vx, s.vz) : Math.atan2(fx, fz);
+    let d = target - s.face; d = Math.atan2(Math.sin(d), Math.cos(d));
+    s.face += d * (1 - Math.exp(-16 * dt));
     g.current.group.position.set(s.x, 0, s.z);
-    g.current.group.rotation.y = s.yaw;
-    g.current.setMoving(Math.min(1, sp / SPEED));
+    g.current.group.rotation.y = s.face;
+    g.current.setMoving(Math.min(1, sp / MOVE_SPEED));
     playerPos.current.set(s.x, 0, s.z);
 
-    // follow camera
-    const D = 10.5, H = 6.4;
-    camera.position.lerp(new THREE.Vector3(s.x + Math.sin(s.camYaw) * D, H, s.z + Math.cos(s.camYaw) * D), 1 - Math.exp(-9 * dt));
-    s.camLook.set(s.x, 1.6, s.z);
-    camera.lookAt(s.camLook);
+    // camera: exactly the Citadel socket rig
+    const lead = Math.min(sp / 60, 0.27 * 1.5) * CAMERA_MOVE_LEAD;
+    const cp = Math.cos(s.pitch), sn = Math.sin(s.pitch);
+    const lookDist = CAMERA_LOOK_AHEAD + lead;
+    s.dLook.set(s.x + fx * lookDist * cp, EYE_Y + CAMERA_LOOK_HEIGHT + lookDist * sn * 2.2, s.z + fz * lookDist * cp);
+    s.dCam.set(s.x - fx * CAMERA_SOCKET_DISTANCE, EYE_Y + CAMERA_SOCKET_HEIGHT, s.z - fz * CAMERA_SOCKET_DISTANCE);
+    const alpha = 1 - Math.pow(1 - CAMERA_LERP, dt * 60);
+    s.cam.lerp(s.dCam, alpha);
+    s.lookAt.lerp(s.dLook, alpha);
+    camera.position.copy(s.cam);
+    camera.lookAt(s.lookAt);
 
     // stations
     const near = nearestStation(s.x, s.z);
     game.setNear(frozen ? game.near : near?.id ?? null);
-    if (pressed('KeyE') && !frozen && near) game.openPanel(near.id);
+    if (!frozen && near && (pressed('Enter') || pressed('Space'))) game.openPanel(near.id);
   });
 
-  return <Gladiator ref={g} color="#3ff0ff" accent="#ffc95c" />;
+  return <Gladiator key={look} ref={g} color={lookColor(look)} />;
 }
 
 const NPC_COLORS = [ACCENTS.coral, ACCENTS.lime, ACCENTS.magenta, ACCENTS.azure, ACCENTS.rose, ACCENTS.emerald, ACCENTS.violet, ACCENTS.gold];

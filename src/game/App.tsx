@@ -11,7 +11,7 @@ export function App() {
   const scene = useGame((s) => s.scene);
   return (
     <>
-      <Canvas camera={{ position: [0, 6, 42], fov: 62, near: 0.1, far: 700 }} dpr={[1, 1.5]} gl={{ antialias: true }}>
+      <Canvas camera={{ position: [0, 4.95, 35.2], fov: 66, near: 0.1, far: 800 }} dpr={[1, 1.5]} gl={{ antialias: true }}>
         {scene === 'ludus' && <Ludus />}
         {scene === 'arena' && <Arena />}
       </Canvas>
