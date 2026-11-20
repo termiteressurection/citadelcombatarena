@@ -3,7 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Gladiator, type GladiatorHandle } from './Gladiator';
 import { Stations } from './Stations';
-import { SurrealGrid } from './art/SurrealGrid';
+import { StaticBatch } from './art/StaticBatch';
 import { SynthwaveHorizon } from './art/SynthwaveHorizon';
 import { SurrealSpores } from './art/SurrealSpores';
 import Starfield from './art/Starfield';
@@ -46,6 +46,24 @@ function Parapet() {
       {seg(cx, maxZ + 0.4, w + 1.6, 0.8, 's')}
       {seg(minX - 0.4, cz, 0.8, d, 'w')}
       {seg(maxX + 0.4, cz, 0.8, d, 'e')}
+    </group>
+  );
+}
+
+/** Replaces the Citadel's full-screen grid shader (too heavy for 60 FPS here) with plain line segments. */
+function CheapGrid() {
+  const geo = useMemo(() => {
+    const pts: number[] = [];
+    const R = 150, step = 6;
+    for (let v = -R; v <= R; v += step) { pts.push(v, 0.2, -R, v, 0.2, R, -R, 0.2, v, R, 0.2, v); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+  }, []);
+  return (
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}><circleGeometry args={[400, 32]} /><meshBasicMaterial color="#05030c" /></mesh>
+      <lineSegments geometry={geo}><lineBasicMaterial color="#7a38ee" transparent opacity={0.28} /></lineSegments>
     </group>
   );
 }
@@ -184,11 +202,11 @@ export function Ludus() {
       <fog attach="fog" args={['#0a0620', 70, 230]} />
       <SynthwaveHorizon />
       <Starfield playerPosRef={playerPos} />
-      <SurrealGrid playerPosRef={playerPos} />
+      <CheapGrid />
       <SurrealSpores />
       <Court />
       <Parapet />
-      <Colonnade playerPos={playerPos} />
+      <StaticBatch><Colonnade playerPos={playerPos} /></StaticBatch>
       <Stations />
       {NPC_COLORS.map((c, i) => <Npc key={i} color={c.hex} seed={i + 1} />)}
       <Player playerPos={playerPos} />

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Ludus } from './Ludus';
+import { Arena } from './Arena';
 import { HUD } from './HUD';
 import { installInput } from './input';
 import { useGame } from './store';
@@ -12,6 +13,7 @@ export function App() {
     <>
       <Canvas camera={{ position: [0, 6, 42], fov: 62, near: 0.1, far: 700 }} dpr={[1, 1.5]} gl={{ antialias: true }}>
         {scene === 'ludus' && <Ludus />}
+        {scene === 'arena' && <Arena />}
       </Canvas>
       <HUD />
     </>

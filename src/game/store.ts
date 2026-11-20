@@ -37,12 +37,12 @@ interface GameState extends Save {
 
 export const useGame = create<GameState>((set, get) => ({
   ...loadSave(),
-  scene: 'ludus',
+  scene: typeof location !== 'undefined' && location.search.includes('arena') ? 'arena' : 'ludus',
   panel: null,
   near: null,
   setNear: (near) => { if (get().near !== near) set({ near }); },
   openPanel: (panel) => set({ panel }),
-  setScene: (scene) => set({ scene, panel: null }),
+  setScene: (scene) => set({ scene, panel: null, near: null }),
   recordDeath: (f) => {
     const fallen = [...get().fallen, f].slice(-50);
     set({ fallen });
