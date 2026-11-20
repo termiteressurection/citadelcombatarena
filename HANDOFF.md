@@ -6,6 +6,7 @@ Unrelated to the Citadel project; repo is only a source of art/tech. Ludus = cal
 
 ## Run
 `npm install && npm run dev` (browser, http://127.0.0.1:5173; add `?arena` to jump straight into a bout)
+`npm run package:mac` (rebuilds + cleanly replaces `/Applications/BONEYARD.app` & `~/Desktop/BONEYARD.app` + clears WebKit cache)
 `npm run dev:tauri` (Mac shell) · `npm run build` · `npx vitest run` · `cd src-tauri && cargo check`
 
 ## Status (Spartacus Overhaul — Option A)
