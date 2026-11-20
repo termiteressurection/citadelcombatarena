@@ -10,7 +10,7 @@ export function installInput(): () => void {
   if (installed) return () => {};
   installed = true;
   const down = (e: KeyboardEvent) => {
-    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    if (e.code.startsWith('Arrow') || e.code === 'Space' || e.code === 'Tab') e.preventDefault();
     if (!e.repeat) fresh.add(e.code);
     keys.add(e.code);
   };

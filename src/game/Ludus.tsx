@@ -153,7 +153,10 @@ function Player({ playerPos }: { playerPos: PosRef }) {
     s.face += d * (1 - Math.exp(-16 * dt));
     g.current.group.position.set(s.x, 0, s.z);
     g.current.group.rotation.y = s.face;
-    g.current.setMoving(Math.min(1, sp / MOVE_SPEED));
+    const move01 = Math.min(1, sp / MOVE_SPEED);
+    g.current.setMoving(move01);
+    g.current.pose.stance = 0;
+    g.current.pose.localVz += (move01 - g.current.pose.localVz) * (1 - Math.exp(-14 * dt));
     playerPos.current.set(s.x, 0, s.z);
 
     // camera: exactly the Citadel socket rig
@@ -213,6 +216,8 @@ function Npc({ color, seed }: { color: string; seed: number }) {
     g.current.group.position.set(s.x, 0, s.z);
     g.current.group.rotation.y = s.yaw;
     g.current.setMoving(moving);
+    g.current.pose.stance = 0;
+    g.current.pose.localVz += (moving - g.current.pose.localVz) * (1 - Math.exp(-10 * dt));
   });
   return <Gladiator ref={g} color={color} accent="#e9e6ff" scale={0.97 + (seed % 3) * 0.04} />;
 }

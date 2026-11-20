@@ -80,4 +80,78 @@ describe('combat rules', () => {
     }
     expect(attacked).toBe(true);
   });
+  it('3-hit light combo escalates damage and resets when window expires', () => {
+    const { p, e } = duel();
+    e.hp = e.maxHp = 500;
+    // Hit 1: light
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    expect(p.atk).toBe('light');
+    expect(p.comboStep).toBe(1);
+    run(p, 0.22, e);
+    const ev1 = resolveStrike(p, [e]);
+    expect(ev1[0].dmg).toBe(12);
+    // Queue Hit 2 during recover
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    run(p, 0.25, e);
+    expect(p.atk).toBe('light2');
+    expect(p.comboStep).toBe(2);
+    run(p, 0.2, e);
+    const ev2 = resolveStrike(p, [e]);
+    expect(ev2[0].dmg).toBe(14);
+    // Queue Hit 3 during recover
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    run(p, 0.25, e);
+    expect(p.atk).toBe('light3');
+    expect(p.comboStep).toBe(3);
+    run(p, 0.28, e);
+    const ev3 = resolveStrike(p, [e]);
+    expect(ev3[0].dmg).toBe(22);
+    // Wait out full recover + combo window and verify reset
+    run(p, 1.1, e);
+    expect(p.state).toBe('idle');
+    expect(p.comboStep).toBe(0);
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    expect(p.atk).toBe('light');
+  });
+  it('light attack cancels into heavy during recovery', () => {
+    const { p, e } = duel();
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    run(p, 0.35, e); // in recover
+    stepFighter(p, { ...NO_INTENT, heavy: true }, 1 / 60, e);
+    expect(p.queuedAtk).toBe('heavy');
+    run(p, 0.2, e);
+    expect(p.atk).toBe('heavy');
+    expect(p.state).toBe('windup');
+  });
+  it('guard-break bash shatters a blocking defender', () => {
+    const { p, e } = duel();
+    e.blocking = true; e.blockT = 0.05; e.yaw = Math.PI;
+    const beforeStam = e.stamina;
+    stepFighter(p, { ...NO_INTENT, bash: true }, 1 / 60, e);
+    expect(p.atk).toBe('bash');
+    expect(run(p, 0.2, e)).toBe(true);
+    const ev = resolveStrike(p, [e]);
+    expect(ev[0].type).toBe('guardBreak');
+    expect(e.blocking).toBe(false);
+    expect(e.stamina).toBeLessThan(beforeStam);
+    expect(e.state).toBe('stagger');
+  });
+  it('forward lunge advances the attacker on strike frame', () => {
+    const { p, e } = duel();
+    e.z = 5;
+    const z0 = p.z;
+    startAttack(p, 'light');
+    expect(run(p, 0.25, e)).toBe(true);
+    expect(p.z).toBeGreaterThan(z0 + 0.1);
+  });
+  it('computes localVx and localVz for forward, backpedal, and strafe', () => {
+    const { p, e } = duel(); // p faces +Z (yaw = 0)
+    run(p, 0.3, e, { ...NO_INTENT, moveZ: 1 });
+    expect(p.localVz).toBeGreaterThan(0.7);
+    expect(Math.abs(p.localVx)).toBeLessThan(0.1);
+    run(p, 0.4, e, { ...NO_INTENT, moveZ: -1 });
+    expect(p.localVz).toBeLessThan(-0.7);
+    run(p, 0.4, e, { ...NO_INTENT, moveX: 1 });
+    expect(p.localVx).toBeGreaterThan(0.7);
+  });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { STATIONS } from './world/layout';
 import { useGame } from './store';
 import { useArena } from './arena/arenaStore';
@@ -105,17 +105,56 @@ function Draft() {
   );
 }
 
+function CalloutFlash() {
+  const callout = useArena((s) => s.callout);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    if (!callout) { setVisible(false); return; }
+    setVisible(true);
+    const id = setTimeout(() => setVisible(false), 650);
+    return () => clearTimeout(id);
+  }, [callout?.id]);
+  if (!callout || !visible) return null;
+  return (
+    <div
+      style={{
+        position: 'absolute', top: '24%', left: '50%', transform: 'translateX(-50%)',
+        fontSize: 28, letterSpacing: '.35em', color: callout.color,
+        textShadow: `0 0 22px ${callout.color}`, fontFamily: 'Termitesse, Menlo, monospace',
+      }}
+    >
+      {callout.text}
+    </div>
+  );
+}
+
 function ArenaHud() {
   const { scene, setScene } = useGame();
   const a = useArena();
   if (scene !== 'arena') return null;
-  const leave = () => { a.set({ phase: 'intro', hp: 100, st: 100, enemies: [] }); setScene('ludus'); };
+  const leave = () => { a.set({ phase: 'intro', hp: 100, st: 100, enemies: [], callout: null, combo: 0 }); setScene('ludus'); };
   return (
     <>
       <div style={{ position: 'absolute', top: 54, left: 22, display: 'grid', gap: 6 }}>
         <Bar v={a.hp} max={a.maxHp} color="#ff4f6d" />
         <Bar v={a.st} max={a.maxSt} color="#4dffa0" w={200} />
         <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: '.15em' }}>BOUT {a.bout} / {LADDER.length}</div>
+        <div
+          style={{
+            display: 'inline-block', justifySelf: 'start', fontSize: 11, letterSpacing: '.14em',
+            padding: '3px 8px',
+            border: `1px solid ${a.lockedName ? '#3ff0ff88' : '#e9e6ff44'}`,
+            color: a.lockedName ? '#3ff0ff' : '#e9e6ff88',
+            background: '#06050daa',
+          }}
+        >
+          {a.lockedName ? `LOCKED · ${a.lockedName} [TAB]` : 'FREE CAM · Q/E ORBIT [TAB]'}
+        </div>
+        {a.combo >= 2 && (
+          <div style={{ fontSize: 18, letterSpacing: '.25em', color: '#ffc95c', textShadow: '0 0 14px #ffc95caa' }}>
+            {a.combo} HIT
+          </div>
+        )}
         <BoonList ids={a.boons} />
       </div>
       <div style={{ position: 'absolute', top: 54, left: '50%', transform: 'translateX(-50%)', display: 'grid', gap: 6, justifyItems: 'center' }}>
@@ -126,6 +165,7 @@ function ArenaHud() {
           </div>
         ))}
       </div>
+      <CalloutFlash />
       {a.phase === 'intro' && <div className="panel" style={{ background: 'transparent' }}><h1>BOUT {a.bout}</h1></div>}
       {a.phase === 'draft' && <Draft />}
       {(a.phase === 'defeat' || a.phase === 'champion') && (
@@ -135,7 +175,7 @@ function ArenaHud() {
           <button className="clickable btn" onClick={leave}>RETURN TO THE LUDUS</button>
         </div>
       )}
-      <div className="controls">WASD move · J / click light · K / right-click heavy · hold SHIFT block (tap right before a hit to parry) · SPACE dodge · Q E rotate camera</div>
+      <div className="controls">WASD move · J / click 3-hit combo · K / r-click heavy · F guard-break · SHIFT block/parry · SPACE dodge · TAB lock-on</div>
     </>
   );
 }

@@ -5,10 +5,10 @@ import { Gladiator, type GladiatorHandle } from './Gladiator';
 import { SynthwaveHorizon } from './art/SynthwaveHorizon';
 import Starfield from './art/Starfield';
 import { DoricColumn } from './art/ClassicalColumns';
-import { ATTACKS, NO_INTENT, aiIntent, makeFighter, resolveStrike, stepFighter, DODGE_TIME, type Fighter, type HitEvent, type Intent, type Kind } from './arena/combat';
+import { ATTACKS, DODGE_TIME, NO_INTENT, aiIntent, makeFighter, resolveStrike, stepFighter, type Fighter, type HitEvent, type Intent, type Kind } from './arena/combat';
 import { ARENA_RADIUS, createArenaWorld, initPhysics, RAPIER } from './arena/physics';
 import { PARTS, Ragdoll } from './arena/ragdoll';
-import { ShardPool } from './arena/effects';
+import { DashGhosts, GhostPool, ShardPool, SlashPool, SlashRibbons } from './arena/effects';
 import { useArena } from './arena/arenaStore';
 import { drawBoons, modsFor } from './arena/boons';
 import { CHAMPION_BONUS, carryHp, gloryForBout, isFinalBout, lookColor, rosterFor } from './arena/run';
@@ -23,17 +23,23 @@ interface ArenaWorld {
   fighters: Fighter[];
   ragdolls: Ragdoll[];
   shards: ShardPool;
+  slashes: SlashPool;
+  ghosts: GhostPool;
   hitstop: number;
   shake: number;
+  fovKick: number;
   time: number;
   acc: number;
   phase: 'intro' | 'fight' | 'victory' | 'defeat';
   phaseT: number;
   ragVersion: number;
-  buf: { light: number; heavy: number; dodge: number };
+  buf: { light: number; heavy: number; bash: number; dodge: number };
   camFwd: THREE.Vector2;
   yaw: number;
   pitch: number;
+  lockOn: boolean;
+  lockedId: number | null;
+  calloutId: number;
   settled: boolean;
 }
 
@@ -45,8 +51,13 @@ function newWorld(roster: Kind[], boons: string[], carry: number, carryMax: numb
   const fighters = [player];
   roster.forEach((k, i) => fighters.push(makeFighter(i + 1, k, (i - (roster.length - 1) / 2) * 4, -8)));
   return {
-    phys: createArenaWorld(), fighters, ragdolls: [], shards: new ShardPool(), hitstop: 0, shake: 0, time: 0, acc: 0,
-    phase: 'intro', phaseT: 0, ragVersion: 0, buf: { light: 0, heavy: 0, dodge: 0 }, camFwd: new THREE.Vector2(0, -1), yaw: 0, pitch: 0, settled: false,
+    phys: createArenaWorld(), fighters, ragdolls: [],
+    shards: new ShardPool(), slashes: new SlashPool(), ghosts: new GhostPool(),
+    hitstop: 0, shake: 0, fovKick: 0, time: 0, acc: 0,
+    phase: 'intro', phaseT: 0, ragVersion: 0,
+    buf: { light: 0, heavy: 0, bash: 0, dodge: 0 },
+    camFwd: new THREE.Vector2(0, -1), yaw: 0, pitch: 0,
+    lockOn: true, lockedId: fighters[1]?.id ?? null, calloutId: 0, settled: false,
   };
 }
 
@@ -56,32 +67,49 @@ const nearestFoe = (f: Fighter, all: Fighter[]): Fighter | null => {
   return best;
 };
 
+const getLockedTarget = (w: ArenaWorld): Fighter | null => {
+  if (!w.lockOn) return null;
+  const f = w.fighters.find((x) => x.id === w.lockedId && x.team === 'e' && x.state !== 'dead');
+  return f ?? nearestFoe(w.fighters[0], w.fighters);
+};
+
 function onHit(w: ArenaWorld, e: HitEvent) {
+  const hud = useArena.getState();
   const v = w.fighters.find((f) => f.id === e.victim)!;
   const a = w.fighters.find((f) => f.id === e.attacker)!;
   const y = 1.3;
   if (e.type === 'parry') {
-    w.hitstop = Math.max(w.hitstop, 0.15); w.shake = Math.max(w.shake, 0.5);
-    w.shards.burst(e.x, y, e.z, 26, 9, '#ffc95c');
+    w.hitstop = Math.max(w.hitstop, 0.16); w.shake = Math.max(w.shake, 0.55); w.fovKick = -7;
+    w.shards.burst(e.x, y, e.z, 28, 9.5, '#ffc95c');
+    w.slashes.spawn(e.x, e.z, 0, 'parry', '#ffc95c');
+    hud.set({ callout: { text: 'PARRY!', color: '#ffc95c', id: ++w.calloutId } });
+  } else if (e.type === 'guardBreak') {
+    w.hitstop = Math.max(w.hitstop, 0.14); w.shake = Math.max(w.shake, 0.5); w.fovKick = -5;
+    w.shards.burst(e.x, y, e.z, 24, 8.5, '#3ff0ff', e.dx, e.dz);
+    hud.set({ callout: { text: 'GUARD BREAK!', color: '#3ff0ff', id: ++w.calloutId } });
   } else if (e.type === 'block') {
     w.hitstop = Math.max(w.hitstop, 0.05); w.shake = Math.max(w.shake, 0.18);
     w.shards.burst(e.x, y, e.z, 8, 5, '#a78bfa', e.dx, e.dz);
   } else if (e.type === 'hit') {
-    w.hitstop = Math.max(w.hitstop, e.heavy ? 0.11 : 0.06); w.shake = Math.max(w.shake, e.heavy ? 0.6 : 0.25);
-    w.shards.burst(v.x, y, v.z, e.heavy ? 22 : 12, e.heavy ? 8 : 5, v.stats.color, e.dx, e.dz);
+    const fin = e.atk === 'light3';
+    w.hitstop = Math.max(w.hitstop, e.heavy || fin ? 0.11 : 0.06);
+    w.shake = Math.max(w.shake, e.heavy || fin ? 0.6 : 0.25);
+    if (e.heavy || fin) w.fovKick = Math.min(w.fovKick, -4);
+    if (fin && a.team === 'p') hud.set({ callout: { text: 'FINISHER!', color: '#ff4fd8', id: ++w.calloutId } });
+    w.shards.burst(v.x, y, v.z, e.heavy || fin ? 24 : 12, e.heavy || fin ? 8.5 : 5, v.stats.color, e.dx, e.dz);
   } else {
     if (a.team === 'p' && a.state !== 'dead') a.hp = Math.min(a.maxHp, a.hp + a.mods.healOnKill);
-    w.hitstop = Math.max(w.hitstop, 0.2); w.shake = Math.max(w.shake, 0.9);
-    w.shards.burst(v.x, y, v.z, 30, 10, v.stats.color, e.dx, e.dz);
+    w.hitstop = Math.max(w.hitstop, 0.22); w.shake = Math.max(w.shake, 0.9); w.fovKick = -6;
+    w.shards.burst(v.x, y, v.z, 34, 10.5, v.stats.color, e.dx, e.dz);
     w.ragdolls.push(new Ragdoll(w.phys, {
       x: v.x, z: v.z, yaw: v.yaw, vx: v.vx * 0.5, vz: v.vz * 0.5,
-      hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy ? 17 : 10, color: v.stats.color,
+      hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy || e.atk === 'light3' ? 17 : 10, color: v.stats.color,
     }));
     w.ragVersion++;
   }
 }
 
-function playerIntent(w: ArenaWorld, f: Fighter, target: Fighter | null): Intent {
+function playerIntent(w: ArenaWorld): Intent {
   const b = w.buf;
   const fx = w.camFwd.x, fz = w.camFwd.y;
   let fwd = 0, side = 0;
@@ -91,59 +119,96 @@ function playerIntent(w: ArenaWorld, f: Fighter, target: Fighter | null): Intent
   if (keys.has('KeyA') || keys.has('ArrowLeft')) side -= 1;
   const rx = -fz, rz = fx;
   const l = Math.hypot(fwd, side);
-  const it: Intent = {
+  return {
     moveX: l > 0 ? (fx * fwd + rx * side) / l : 0,
     moveZ: l > 0 ? (fz * fwd + rz * side) / l : 0,
-    light: b.light > 0, heavy: b.heavy > 0, block: keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('KeyL'), dodge: b.dodge > 0,
+    light: b.light > 0, heavy: b.heavy > 0, bash: b.bash > 0,
+    block: keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('KeyL'),
+    dodge: b.dodge > 0,
   };
-  void f; void target;
-  return it;
 }
 
 function simulate(w: ArenaWorld, dt: number, bout: number) {
   const hud = useArena.getState();
   w.time += dt; w.phaseT += dt;
   w.shake = Math.max(0, w.shake - dt * 2.4);
-  const b = w.buf;
-  if (pressed('KeyJ') || pressed('Mouse0')) b.light = 0.18;
-  if (pressed('KeyK') || pressed('Mouse2')) b.heavy = 0.18;
-  if (pressed('Space')) b.dodge = 0.14;
+  w.fovKick *= Math.exp(-8 * dt);
 
-  if (w.phase === 'intro') {
-    if (w.phaseT > 1.6) { w.phase = 'fight'; w.phaseT = 0; hud.set({ phase: 'fight' }); }
+  const b = w.buf;
+  if (pressed('KeyJ') || pressed('Mouse0')) b.light = 0.22;
+  if (pressed('KeyK') || pressed('Mouse2')) b.heavy = 0.22;
+  if (pressed('KeyF')) b.bash = 0.22;
+  if (pressed('Space')) b.dodge = 0.16;
+
+  if (w.phase === 'intro' && w.phaseT > 1.6) {
+    w.phase = 'fight'; w.phaseT = 0; hud.set({ phase: 'fight' });
   }
   const fighting = w.phase === 'fight';
 
-  // Citadel camera: Q / E orbit, R / F pitch. A gentle assist keeps the foe in frame when you aren't steering.
-  const pl0 = w.fighters[0];
-  let orbit = 0;
-  if (keys.has('KeyQ')) orbit += 1;
-  if (keys.has('KeyE')) orbit -= 1;
-  if (orbit) w.yaw += orbit * KB_YAW_SENS * dt * 60;
-  else {
-    const foe0 = nearestFoe(pl0, w.fighters);
-    if (foe0 && pl0.state !== 'dead') {
-      const want = Math.atan2(-(foe0.x - pl0.x), -(foe0.z - pl0.z));
-      let d = want - w.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
-      if (Math.abs(d) > 0.5) w.yaw += Math.sign(d) * Math.min(Math.abs(d) - 0.5, 1.4 * dt);
+  const player = w.fighters[0];
+  const liveFoes = w.fighters.filter((f) => f.team === 'e' && f.state !== 'dead');
+
+  // Lock-On toggle / cycle target via Tab
+  if (pressed('Tab')) {
+    if (!w.lockOn && liveFoes.length > 0) {
+      w.lockOn = true; w.lockedId = liveFoes[0].id;
+    } else if (w.lockOn) {
+      const idx = liveFoes.findIndex((f) => f.id === w.lockedId);
+      if (idx >= 0 && idx < liveFoes.length - 1) w.lockedId = liveFoes[idx + 1].id;
+      else { w.lockOn = false; w.lockedId = null; }
     }
   }
-  if (keys.has('KeyR')) w.pitch = Math.min(1.4, w.pitch + KB_YAW_SENS * dt * 60);
-  if (keys.has('KeyF')) w.pitch = Math.max(-1.3, w.pitch - KB_YAW_SENS * dt * 60);
-  w.camFwd.set(-Math.sin(w.yaw), -Math.cos(w.yaw));
+  let locked = w.lockOn ? liveFoes.find((f) => f.id === w.lockedId) ?? null : null;
+  if (w.lockOn && !locked && liveFoes.length > 0) {
+    locked = nearestFoe(player, w.fighters);
+    w.lockedId = locked?.id ?? null;
+  }
+
+  // Camera vector: squared up on locked target, or Citadel free orbit (Q/E/R/F)
+  if (w.lockOn && locked) {
+    const dx = locked.x - player.x, dz = locked.z - player.z;
+    const d = Math.hypot(dx, dz) || 1;
+    w.camFwd.set(dx / d, dz / d);
+    w.yaw = Math.atan2(-w.camFwd.x, -w.camFwd.y);
+  } else {
+    let orbit = 0;
+    if (keys.has('KeyQ')) orbit += 1;
+    if (keys.has('KeyE')) orbit -= 1;
+    if (orbit) w.yaw += orbit * KB_YAW_SENS * dt * 60;
+    if (keys.has('KeyR')) w.pitch = Math.min(1.4, w.pitch + KB_YAW_SENS * dt * 60);
+    if (keys.has('KeyF')) w.pitch = Math.max(-1.3, w.pitch - KB_YAW_SENS * dt * 60);
+    w.camFwd.set(-Math.sin(w.yaw), -Math.cos(w.yaw));
+  }
 
   if (w.hitstop > 0) { w.hitstop -= dt; return; }
-  const player = w.fighters[0];
+
   for (const f of w.fighters) {
     if (f.state === 'dead') continue;
-    const foe = nearestFoe(f, w.fighters);
+    const target = f === player ? locked : nearestFoe(f, w.fighters);
     let intent: Intent = NO_INTENT;
-    if (fighting && foe) intent = f === player ? playerIntent(w, f, foe) : aiIntent(f, foe, dt);
+    if (fighting) {
+      if (f === player) intent = playerIntent(w);
+      else if (target) intent = aiIntent(f, target, dt);
+    }
     const prev = f.state;
-    const strike = stepFighter(f, intent, dt, foe);
-    if (f === player && f.state !== 'idle' && prev === 'idle') { b.light = 0; b.heavy = 0; b.dodge = 0; }
+    const prevQueued = f.queuedAtk;
+    const strike = stepFighter(f, intent, dt, target);
 
-    // keep inside the visible wall, and don't overlap other fighters
+    if (f === player) {
+      if (f.state !== 'idle' && prev === 'idle') { b.light = 0; b.heavy = 0; b.bash = 0; b.dodge = 0; }
+      if (f.queuedAtk && f.queuedAtk !== prevQueued) { b.light = 0; b.heavy = 0; b.bash = 0; }
+    }
+
+    // Spawn dodge afterimages
+    if (f.state === 'dodge') {
+      const startGhost = prev !== 'dodge';
+      const stepGhost = Math.floor(f.t / 0.09) > Math.floor(Math.max(0, f.t - dt) / 0.09);
+      if (startGhost || stepGhost) {
+        w.ghosts.spawn(f.x, f.z, f.yaw, f.stats.color, f.dodgeLocalZ * 0.45, -f.dodgeLocalX * 0.45);
+      }
+    }
+
+    // Keep inside visible arena wall and separate overlapping fighters
     const r = Math.hypot(f.x, f.z), lim = ARENA_RADIUS - f.stats.radius - 0.2;
     if (r > lim) { f.x *= lim / r; f.z *= lim / r; }
     for (const o of w.fighters) {
@@ -151,11 +216,16 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
       const dx = f.x - o.x, dz = f.z - o.z, min = f.stats.radius + o.stats.radius, d = Math.hypot(dx, dz) || 1e-6;
       if (d < min) { const p = (min - d) / 2; f.x += (dx / d) * p; f.z += (dz / d) * p; }
     }
-    if (strike) for (const e of resolveStrike(f, w.fighters)) onHit(w, e);
-  }
-  b.light = Math.max(0, b.light - dt); b.heavy = Math.max(0, b.heavy - dt); b.dodge = Math.max(0, b.dodge - dt);
 
-  // end of bout
+    if (strike && f.atk) {
+      const slashColor = f.atk === 'light3' ? '#ffc95c' : f.team === 'p' ? f.stats.color : '#ff4f6d';
+      w.slashes.spawn(f.x, f.z, f.yaw, f.atk, slashColor);
+      for (const e of resolveStrike(f, w.fighters)) onHit(w, e);
+    }
+  }
+  b.light = Math.max(0, b.light - dt); b.heavy = Math.max(0, b.heavy - dt);
+  b.bash = Math.max(0, b.bash - dt); b.dodge = Math.max(0, b.dodge - dt);
+
   if (fighting) {
     const foesLeft = w.fighters.some((f) => f.team === 'e' && f.state !== 'dead');
     if (player.state === 'dead') { w.phase = 'defeat'; w.phaseT = 0; }
@@ -175,22 +245,64 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     h.group.rotation.y = f.yaw;
     const p = h.pose;
     const at = f.atk ? ATTACKS[f.atk] : null;
-    let swing = -0.2, tele = 0;
+    let progress = 0, tele = 0;
     if (at && f.state === 'windup') {
       const wt = at.windup * f.stats.windupMul;
-      const k = Math.min(1, f.t / wt);
-      swing = -0.2 - k * 2.2; tele = f.team === 'e' ? 0.3 + k * 0.7 : 0;
-    } else if (at && f.state === 'strike') { swing = -2.4 + (f.t / at.strike) * 1.8; }
-    else if (at && f.state === 'recover') { swing = -0.6 + 0.4 * (f.t / at.recover); }
-    p.swing += (swing - p.swing) * 0.5;
+      progress = Math.min(1, f.t / wt);
+      tele = f.team === 'e' ? 0.35 + progress * 0.65 : 0;
+    } else if (at && f.state === 'strike') {
+      progress = Math.min(1, f.t / at.strike);
+    } else if (at && f.state === 'recover') {
+      progress = Math.min(1, f.t / at.recover);
+    } else if (f.state === 'dodge') {
+      progress = Math.min(1, f.t / DODGE_TIME);
+    } else if (f.state === 'stagger') {
+      progress = Math.min(1, f.t / (f.stagger || 0.2));
+    }
+    p.state = f.state;
+    p.atk = f.atk;
+    p.progress = progress;
     p.telegraph = tele;
     p.block += ((f.blocking ? 1 : 0) - p.block) * 0.35;
-    p.hurt = f.state === 'stagger' ? Math.max(0, 1 - f.t / 0.2) : Math.max(0, p.hurt - 0.1);
+    p.hurt = f.state === 'stagger' ? Math.max(0, 1 - f.t / 0.25) : Math.max(0, p.hurt - 0.12);
+    p.stance = 1;
+    p.localVx = f.localVx;
+    p.localVz = f.localVz;
+    p.dodgeLocalX = f.dodgeLocalX;
+    p.dodgeLocalZ = f.dodgeLocalZ;
     const sp = Math.hypot(f.vx, f.vz);
     h.setMoving(f.state === 'dodge' ? 1 : Math.min(1, sp / f.stats.speed));
-    if (f.state === 'dodge') h.group.rotation.x = Math.sin((f.t / DODGE_TIME) * Math.PI) * 0.5; else h.group.rotation.x = 0;
   });
   return <Gladiator ref={g} color={f.stats.color} accent={f.team === 'p' ? '#ffc95c' : '#e9e6ff'} scale={f.kind === 'brute' ? 1.3 : f.kind === 'champion' ? 1.15 : 1} />;
+}
+
+function TargetReticle({ w }: { w: ArenaWorld }) {
+  const ref = useRef<THREE.Group>(null!);
+  useFrame(({ clock }) => {
+    const t = getLockedTarget(w);
+    if (!ref.current) return;
+    if (!t || w.phase !== 'fight') {
+      ref.current.visible = false;
+      return;
+    }
+    ref.current.visible = true;
+    ref.current.position.set(t.x, 0.05, t.z);
+    ref.current.rotation.y = clock.elapsedTime * 2.2;
+    const pulse = 1 + Math.sin(clock.elapsedTime * 6) * 0.08;
+    ref.current.scale.setScalar(pulse);
+  });
+  return (
+    <group ref={ref} visible={false}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.76, 0.88, 4]} />
+        <meshBasicMaterial color="#3ff0ff" transparent opacity={0.85} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, Math.PI / 4]}>
+        <ringGeometry args={[0.92, 0.98, 4]} />
+        <meshBasicMaterial color="#ffc95c" transparent opacity={0.6} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
 }
 
 const STICK_DIMS: Record<string, [number, number, number]> = {
@@ -252,8 +364,17 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
   const shardMesh = useRef<THREE.InstancedMesh>(null!);
   const [ragVer, setRagVer] = useState(0);
   const playerPos = useRef(new THREE.Vector3());
-  const camPos = useRef(new THREE.Vector3(0, CAM_HEIGHT, 13.2));
-  const look = useRef(new THREE.Vector3());
+  const camPos = useRef(new THREE.Vector3(1.35, 3.85, 13.8));
+  const look = useRef(new THREE.Vector3(0, 1.45, 0));
+  const desiredCam = useRef(new THREE.Vector3());
+  const desiredLook = useRef(new THREE.Vector3());
+
+  useEffect(() => () => {
+    if (camera instanceof THREE.PerspectiveCamera && camera.fov !== 66) {
+      camera.fov = 66;
+      camera.updateProjectionMatrix();
+    }
+  }, [camera]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -273,19 +394,30 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
         }
       }
       w.shards.update(1 / 60, shardMesh.current);
+      w.slashes.update(1 / 60);
+      w.ghosts.update(1 / 60);
     }
     if (ragVer !== w.ragVersion) setRagVer(w.ragVersion);
 
     // HUD sync (only when values change)
     const p = w.fighters[0];
+    const locked = getLockedTarget(w);
+    const lockedName = w.lockOn && locked ? locked.stats.name : null;
     const enemies = w.fighters.filter((f) => f.team === 'e').map((f) => ({ id: f.id, name: f.stats.name, hp: Math.ceil(f.hp), max: f.maxHp }));
     const sameEnemies = enemies.length === hud.enemies.length && enemies.every((e, i) => e.hp === hud.enemies[i].hp);
     const hp = Math.ceil(p.hp), st = Math.floor(p.stamina);
     const resultLive = (w.phase === 'victory' || w.phase === 'defeat') && w.phaseT > 2.2;
     if (!w.settled) {
       const shown = w.phase === 'intro' ? 'intro' : 'fight';
-      if (hp !== hud.hp || st !== hud.st || !sameEnemies || hud.maxHp !== p.maxHp || shown !== hud.phase) {
-        hud.set({ hp, st, maxHp: p.maxHp, maxSt: p.maxStamina, enemies: sameEnemies ? hud.enemies : enemies, phase: shown });
+      if (
+        hp !== hud.hp || st !== hud.st || !sameEnemies || hud.maxHp !== p.maxHp ||
+        shown !== hud.phase || lockedName !== hud.lockedName || p.comboStep !== hud.combo
+      ) {
+        hud.set({
+          hp, st, maxHp: p.maxHp, maxSt: p.maxStamina,
+          enemies: sameEnemies ? hud.enemies : enemies,
+          phase: shown, lockedName, combo: p.comboStep,
+        });
       }
     }
     if (resultLive && !w.settled) {
@@ -295,24 +427,44 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
       if (w.phase === 'victory') {
         const earned = gloryForBout(bout, mul) + (isFinalBout(bout) ? Math.round(CHAMPION_BONUS * mul) : 0);
         game.addGlory(earned);
-        if (isFinalBout(bout)) { game.recordChampion(); hud.set({ phase: 'champion', earned, enemies: [] }); }
-        else hud.set({ phase: 'draft', earned, enemies: [], draft: drawBoons().map((b) => b.id), carryHp: carryHp(p.hp, p.maxHp), carryMax: p.maxHp });
+        if (isFinalBout(bout)) { game.recordChampion(); hud.set({ phase: 'champion', earned, enemies: [], callout: null }); }
+        else hud.set({ phase: 'draft', earned, enemies: [], draft: drawBoons().map((b) => b.id), carryHp: carryHp(p.hp, p.maxHp), carryMax: p.maxHp, callout: null });
       } else {
         game.recordDeath({ name: 'A nameless gladiator', bouts: bout, cause: `slain by ${w.fighters.find((x) => x.team === 'e' && x.state !== 'dead')?.stats.name ?? 'the sand'}`, date: new Date().toISOString().slice(0, 10) });
-        hud.set({ phase: 'defeat', enemies: [] });
+        hud.set({ phase: 'defeat', enemies: [], callout: null });
       }
     }
 
-    // camera: the Citadel's socket rig, 5.2 behind and 3.35 above, looking 8.8 ahead
+    // Camera FOV punch
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const targetFov = 66 + w.fovKick;
+      if (Math.abs(camera.fov - targetFov) > 0.02) {
+        camera.fov = targetFov;
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    // Lock-On over-shoulder framing or Citadel free cam
     const f = w.camFwd;
     playerPos.current.set(p.x, 0, p.z);
-    const cp = Math.cos(w.pitch), sp = Math.sin(w.pitch);
-    const target = new THREE.Vector3(p.x - f.x * CAM_DIST, CAM_HEIGHT, p.z - f.y * CAM_DIST);
+    if (w.lockOn && locked) {
+      const rx = -f.y, rz = f.x;
+      desiredCam.current.set(p.x - f.x * 5.8 + rx * 1.35, 3.85, p.z - f.y * 5.8 + rz * 1.35);
+      desiredLook.current.set(p.x + (locked.x - p.x) * 0.45, 1.45, p.z + (locked.z - p.z) * 0.45);
+    } else {
+      const cp = Math.cos(w.pitch), sp = Math.sin(w.pitch);
+      desiredCam.current.set(p.x - f.x * CAM_DIST, CAM_HEIGHT, p.z - f.y * CAM_DIST);
+      desiredLook.current.set(p.x + f.x * LOOK_AHEAD * cp, LOOK_HEIGHT + LOOK_AHEAD * sp * 2.2, p.z + f.y * LOOK_AHEAD * cp);
+    }
     const alpha = 1 - Math.pow(1 - CAM_LERP, dt * 60);
-    camPos.current.lerp(target, alpha);
+    camPos.current.lerp(desiredCam.current, alpha);
     camera.position.copy(camPos.current);
-    if (w.shake > 0) camera.position.add(new THREE.Vector3((Math.random() - 0.5) * w.shake * 0.6, (Math.random() - 0.5) * w.shake * 0.4, (Math.random() - 0.5) * w.shake * 0.6));
-    look.current.lerp(new THREE.Vector3(p.x + f.x * LOOK_AHEAD * cp, LOOK_HEIGHT + LOOK_AHEAD * sp * 2.2, p.z + f.y * LOOK_AHEAD * cp), alpha);
+    if (w.shake > 0) {
+      camera.position.x += (Math.random() - 0.5) * w.shake * 0.6;
+      camera.position.y += (Math.random() - 0.5) * w.shake * 0.4;
+      camera.position.z += (Math.random() - 0.5) * w.shake * 0.6;
+    }
+    look.current.lerp(desiredLook.current, alpha);
     camera.lookAt(look.current);
   });
 
@@ -324,7 +476,10 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
       <Starfield playerPosRef={playerPos} />
       <Ring />
       <Stands />
+      <TargetReticle w={w} />
       {w.fighters.map((f, i) => <FighterView key={f.id} w={w} index={i} />)}
+      <SlashRibbons pool={w.slashes} />
+      <DashGhosts pool={w.ghosts} />
       {w.ragdolls.map((r) => <RagdollView key={r.id} rag={r} />)}
       <instancedMesh ref={shardMesh} args={[undefined, undefined, ShardPool.CAP]} frustumCulled={false}>
         <octahedronGeometry args={[1, 0]} />
@@ -344,7 +499,16 @@ export function Arena() {
       if (dead) return;
       const a = useArena.getState();
       w.current = newWorld(rosterFor(bout), a.boons, a.carryHp, a.carryMax, useGame.getState().look);
-      a.set({ phase: 'intro', hp: w.current.fighters[0].hp, maxHp: w.current.fighters[0].maxHp, st: 100, enemies: [] });
+      a.set({
+        phase: 'intro',
+        hp: w.current.fighters[0].hp,
+        maxHp: w.current.fighters[0].maxHp,
+        st: 100,
+        enemies: [],
+        lockedName: w.current.fighters[1]?.stats.name ?? null,
+        combo: 0,
+        callout: null,
+      });
       setReady(true);
     });
     return () => { dead = true; w.current?.phys.free(); w.current = null; setReady(false); };
