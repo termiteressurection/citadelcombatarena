@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest';
+import { clampBounds, isFree, resolveCircles } from '../world/colliders';
+import { BOUNDS, COLUMNS, PLAYER_START, SOLIDS, STATIONS, nearestStation } from '../world/layout';
+
+describe('colliders', () => {
+  it('pushes a circle out of a solid', () => {
+    const p = { x: 0.2, z: 0 };
+    resolveCircles(p, 0.5, [{ x: 0, z: 0, r: 1 }]);
+    expect(Math.hypot(p.x, p.z)).toBeCloseTo(1.5);
+  });
+  it('clamps to bounds', () => {
+    const p = { x: 999, z: -999 };
+    clampBounds(p, 0.5, BOUNDS);
+    expect(p.x).toBe(BOUNDS.maxX - 0.5);
+    expect(p.z).toBe(BOUNDS.minZ + 0.5);
+  });
+});
+
+describe('ludus layout', () => {
+  it('has a solid for every column (no invisible or missing colliders)', () => {
+    expect(COLUMNS.length).toBeGreaterThan(30);
+    for (const c of COLUMNS) expect(SOLIDS.some((s) => s.x === c.pos[0] && s.z === c.pos[2])).toBe(true);
+  });
+  it('spawns the player in free space', () => {
+    expect(isFree(PLAYER_START.x, PLAYER_START.z, 0.55, SOLIDS, BOUNDS)).toBe(true);
+  });
+  it('keeps every station reachable and inside the court', () => {
+    expect(STATIONS).toHaveLength(5);
+    for (const s of STATIONS) {
+      expect(s.pos[0]).toBeGreaterThan(BOUNDS.minX);
+      expect(s.pos[0]).toBeLessThan(BOUNDS.maxX);
+      expect(s.pos[1]).toBeGreaterThan(BOUNDS.minZ);
+      expect(s.pos[1]).toBeLessThan(BOUNDS.maxZ);
+      expect(nearestStation(s.pos[0], s.pos[1] + 3)?.id).toBe(s.id);
+    }
+  });
+  it('leaves the Gate opening walkable', () => {
+    expect(isFree(0, -41, 0.55, SOLIDS, BOUNDS)).toBe(true);
+  });
+});

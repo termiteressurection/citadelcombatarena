@@ -1,0 +1,31 @@
+export const keys = new Set<string>();
+const fresh = new Set<string>();
+export const drag = { dx: 0 };
+let installed = false;
+
+/** True once per key press. */
+export const pressed = (code: string): boolean => fresh.delete(code);
+
+export function installInput(): () => void {
+  if (installed) return () => {};
+  installed = true;
+  const down = (e: KeyboardEvent) => {
+    if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+    if (!e.repeat) fresh.add(e.code);
+    keys.add(e.code);
+  };
+  const up = (e: KeyboardEvent) => keys.delete(e.code);
+  const move = (e: MouseEvent) => { if (e.buttons & 1) drag.dx += e.movementX; };
+  const blur = () => { keys.clear(); fresh.clear(); };
+  window.addEventListener('keydown', down);
+  window.addEventListener('keyup', up);
+  window.addEventListener('mousemove', move);
+  window.addEventListener('blur', blur);
+  return () => {
+    installed = false;
+    window.removeEventListener('keydown', down);
+    window.removeEventListener('keyup', up);
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('blur', blur);
+  };
+}
