@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACKS, KINDS, NO_INTENT, aiIntent, makeFighter, resolveStrike, startAttack, stepFighter, PARRY_WINDOW } from '../arena/combat';
+import { ATTACKS, KINDS, NO_INTENT, aiIntent, makeFighter, pickTargetZone, resolveStrike, startAttack, stepFighter, PARRY_WINDOW } from '../arena/combat';
 
 const duel = () => {
   const p = makeFighter(0, 'player', 0, 0);
@@ -153,5 +153,81 @@ describe('combat rules', () => {
     expect(p.localVz).toBeLessThan(-0.7);
     run(p, 0.4, e, { ...NO_INTENT, moveX: 1 });
     expect(p.localVx).toBeGreaterThan(0.7);
+  });
+  it('routes attacks to distinct limbs and falls back to torso when severed', () => {
+    const { e } = duel();
+    expect(pickTargetZone('light', e)).toBe('armL');
+    expect(pickTargetZone('light2', e)).toBe('armR');
+    expect(pickTargetZone('light3', e)).toBe('legL');
+    expect(pickTargetZone('bash', e)).toBe('legL');
+    expect(pickTargetZone('heavy', e)).toBe('head');
+    e.limbs.legL.hp = 0; e.limbs.legL.severed = true;
+    expect(pickTargetZone('light3', e)).toBe('legR');
+    e.limbs.armL.hp = 0; e.limbs.armL.severed = true;
+    expect(pickTargetZone('light', e)).toBe('torso');
+  });
+  it('severing shield arm disables blocking', () => {
+    const { p, e } = duel();
+    e.hp = e.maxHp = 500;
+    e.limbs.armL.hp = 5;
+    startAttack(p, 'light'); run(p, 0.22, e);
+    const ev = resolveStrike(p, [e]);
+    expect(ev[0].severed).toBe('armL');
+    expect(e.limbs.armL.severed).toBe(true);
+    stepFighter(e, { ...NO_INTENT, block: true }, 1 / 60, p);
+    expect(e.blocking).toBe(false);
+  });
+  it('breaking enemy sword arm disarms, while player sword arm cripples without soft-lock', () => {
+    const { p, e } = duel();
+    e.hp = e.maxHp = 500;
+    e.limbs.armR.hp = 5;
+    p.state = 'idle'; p.atk = 'light2';
+    const evE = resolveStrike(p, [e]);
+    expect(evE[0].severed).toBe('armR');
+    expect(e.limbs.armR.severed).toBe(true);
+    expect(startAttack(e, 'light')).toBe(false);
+    // Disarmed AI never picks light/heavy even at melee range
+    e.z = 1.5; e.ai.timer = 10;
+    const intent = aiIntent(e, p, 1 / 60);
+    expect(intent.light).toBe(false);
+    expect(intent.heavy).toBe(false);
+
+    // Player armR cripples instead of severing and deals 0.65x damage
+    const p2 = makeFighter(0, 'player', 0, 0);
+    const dummy = makeFighter(1, 'brute', 0, 2);
+    dummy.hp = dummy.maxHp = 500;
+    p2.limbs.armR.hp = 5;
+    const e2 = makeFighter(2, 'skirmisher', 0, 2);
+    e2.yaw = Math.PI;
+    e2.state = 'idle'; e2.atk = 'light2';
+    const evP = resolveStrike(e2, [p2]);
+    expect(evP[0].broken).toBe('armR');
+    expect(evP[0].severed).toBeUndefined();
+    expect(p2.limbs.armR.severed).toBe(false);
+    p2.state = 'idle'; p2.atk = 'light';
+    const crippledHit = resolveStrike(p2, [dummy]);
+    expect(crippledHit[0].dmg).toBeCloseTo(12 * 0.65, 5);
+  });
+  it('broken leg slows movement and prevents dodging', () => {
+    const p1 = makeFighter(0, 'player', 0, 0);
+    const p2 = makeFighter(1, 'player', 0, 0);
+    p2.limbs.legL.hp = 0;
+    const foe = makeFighter(2, 'skirmisher', 0, 10);
+    run(p1, 0.4, foe, { ...NO_INTENT, moveZ: 1 });
+    run(p2, 0.4, foe, { ...NO_INTENT, moveZ: 1 });
+    expect(p2.z).toBeLessThan(p1.z * 0.7);
+    stepFighter(p2, { ...NO_INTENT, dodge: true, moveX: 1 }, 1 / 60, foe);
+    expect(p2.state).not.toBe('dodge');
+  });
+  it('breaking head triggers instant decapitation kill', () => {
+    const { p, e } = duel();
+    e.hp = e.maxHp = 500;
+    e.limbs.head.hp = 10;
+    startAttack(p, 'heavy'); run(p, 0.55, e);
+    const ev = resolveStrike(p, [e]);
+    expect(ev[0].type).toBe('kill');
+    expect(ev[0].decap).toBe(true);
+    expect(ev[0].severed).toBe('head');
+    expect(e.state).toBe('dead');
   });
 });

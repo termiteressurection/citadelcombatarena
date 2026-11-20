@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { LimbKey } from '../arena/combat';
 import { createArenaWorld, initPhysics } from '../arena/physics';
-import { Ragdoll, RAGDOLL_SHATTER_AT } from '../arena/ragdoll';
+import { PIECE_SHATTER_AT, Ragdoll, RAGDOLL_SHATTER_AT, SeveredPiece } from '../arena/ragdoll';
 
 beforeAll(async () => { await initPhysics(); });
 
@@ -32,6 +33,42 @@ describe('ragdoll stability', () => {
       r.dispose();
     }
     expect(worstSpeed).toBeLessThan(60);
+    expect(world.bodies.len()).toBe(0);
+  });
+
+  it('launches 30 severed pieces + partial ragdolls safely and disposes cleanly', () => {
+    const world = createArenaWorld();
+    const kinds: LimbKey[] = ['head', 'armL', 'armR', 'legL', 'legR'];
+    for (let k = 0; k < 30; k++) {
+      const a = (k / 30) * Math.PI * 2;
+      const kind = kinds[k % kinds.length];
+      const piece = new SeveredPiece(world, {
+        kind, x: Math.cos(a) * 4, z: Math.sin(a) * 4, yaw: a,
+        hitX: Math.cos(a), hitZ: Math.sin(a), hitSpeed: 14, color: '#ff4fd8',
+      });
+      const rag = new Ragdoll(world, {
+        x: Math.cos(a) * 5, z: Math.sin(a) * 5, yaw: a,
+        vx: 1, vz: 1, hitX: -Math.cos(a), hitZ: -Math.sin(a), hitSpeed: 14, color: '#ff6b6b',
+        severed: { head: true, armL: k % 2 === 0, armR: k % 3 === 0, legL: true },
+      });
+      expect(rag.partNames).not.toContain('head');
+      expect(rag.partNames).not.toContain('shinL');
+      let pieceDone = false;
+      for (let i = 0; i < 60 * 9 && !pieceDone; i++) {
+        world.step();
+        expect(piece.isFinite()).toBe(true);
+        if (!rag.shattered) {
+          expect(rag.isFinite()).toBe(true);
+          if (rag.tick(1 / 60)) rag.dispose();
+        }
+        pieceDone = piece.tick(1 / 60);
+      }
+      expect(pieceDone).toBe(true);
+      expect(piece.age).toBeLessThanOrEqual(PIECE_SHATTER_AT + 0.05);
+      expect(piece.slept).toBe(true);
+      piece.dispose();
+      if (!rag.shattered) rag.dispose();
+    }
     expect(world.bodies.len()).toBe(0);
   });
 });

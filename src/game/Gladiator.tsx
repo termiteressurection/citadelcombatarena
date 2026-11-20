@@ -1,7 +1,9 @@
 import { forwardRef, useRef, useImperativeHandle, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { Atk, State } from './arena/combat';
+import type { Atk, LimbKey, State } from './arena/combat';
+
+export type LimbPose = Record<LimbKey, { ratio: number; severed: boolean }>;
 
 export interface Pose {
   state: State;
@@ -21,6 +23,8 @@ export interface Pose {
   /** normalized fighter-local dodge vector */
   dodgeLocalX: number;
   dodgeLocalZ: number;
+  /** per-limb health ratio & severed flags (optional; defaults intact) */
+  limbs?: LimbPose;
 }
 
 export interface GladiatorHandle { group: THREE.Group; pose: Pose; setMoving: (speed01: number) => void }
@@ -36,7 +40,7 @@ function Dash({ len, w = THICK, y = 0, mat }: { len: number; w?: number; y?: num
 const smooth = (cur: number, target: number, rate: number, dt: number) =>
   THREE.MathUtils.lerp(cur, target, 1 - Math.exp(-rate * dt));
 
-/** Articulated stick-figure gladiator: stark Nostalgaia dashes with full-body combat choreography. */
+/** Articulated stick-figure gladiator: stark Nostalgaia dashes with limb damage colors, severing, and limp choreography. */
 export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: string; scale?: number }>(
   function Gladiator({ color, scale = 1 }, ref) {
     const group = useRef<THREE.Group>(null!);
@@ -56,18 +60,38 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       localVx: 0, localVz: 0, dodgeLocalX: 0, dodgeLocalZ: 0,
     });
 
-    const base = useMemo(() => new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.72), [color]);
-    const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: base }), [base]);
-    const swordMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ffffff' }), []);
-    const warn = useMemo(() => new THREE.Color('#ff3b3b'), []);
-    const white = useMemo(() => new THREE.Color('#ffffff'), []);
+    const colors = useMemo(() => ({
+      base: new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.72),
+      amber: new THREE.Color('#ffc95c'),
+      crimson: new THREE.Color('#ff3b5c'),
+      warn: new THREE.Color('#ff3b3b'),
+      white: new THREE.Color('#ffffff'),
+    }), [color]);
+
+    const mats = useMemo(() => ({
+      head: new THREE.MeshBasicMaterial({ color: colors.base }),
+      torso: new THREE.MeshBasicMaterial({ color: colors.base }),
+      armL: new THREE.MeshBasicMaterial({ color: colors.base }),
+      armR: new THREE.MeshBasicMaterial({ color: colors.base }),
+      legL: new THREE.MeshBasicMaterial({ color: colors.base }),
+      legR: new THREE.MeshBasicMaterial({ color: colors.base }),
+      sword: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
+    }), [colors]);
 
     useImperativeHandle(ref, () => ({ group: group.current, pose: pose.current, setMoving: (s) => { speed.current = s; } }), []);
 
-    useFrame((_, delta) => {
+    useFrame(({ clock }, delta) => {
       const dt = Math.min(delta, 0.05);
       const p = pose.current;
       const st = p.stance;
+      const limbs = p.limbs;
+
+      // Visibility of severable limbs (leave thigh stumps when shins sever)
+      head.current.visible = !(limbs?.head.severed);
+      shL.current.visible = !(limbs?.armL.severed);
+      shR.current.visible = !(limbs?.armR.severed);
+      kneeL.current.visible = !(limbs?.legL.severed);
+      kneeR.current.visible = !(limbs?.legR.severed);
 
       // Movement vector in fighter-local space (fallback to speed.current in Ludus)
       let lvx = p.localVx;
@@ -109,6 +133,22 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       let shRY = 0;
       let shRZ = -0.18 - 0.08 * st;
       let elRX = -0.45 - 0.35 * st;
+
+      const legLBroken = (limbs?.legL.ratio ?? 1) <= 0;
+      const legRBroken = (limbs?.legR.ratio ?? 1) <= 0;
+      const armRCrippled = (limbs?.armR.ratio ?? 1) <= 0 && !(limbs?.armR.severed);
+
+      if (legLBroken || legRBroken) {
+        if (legLBroken && !legRBroken) rootRoll += 0.16;
+        else if (legRBroken && !legLBroken) rootRoll -= 0.16;
+        pelvisY -= 0.12 * Math.max(0, Math.sin(phase.current));
+        if (legLBroken) { hipLX *= 0.38; kneeLX = 0.18; }
+        if (legRBroken) { hipRX *= 0.38; kneeRX = 0.18; }
+      }
+      if (armRCrippled && p.state === 'idle') {
+        shRX += 0.32 + Math.sin(clock.elapsedTime * 18) * 0.04;
+        elRX += 0.25;
+      }
 
       let blend = 14;
       const k = Math.max(0, Math.min(1, p.progress));
@@ -258,45 +298,65 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       shR.current.rotation.z = smooth(shR.current.rotation.z, shRZ, blend, dt);
       elR.current.rotation.x = smooth(elR.current.rotation.x, elRX, blend, dt);
 
-      mat.color.copy(base).lerp(warn, p.telegraph).lerp(white, p.hurt);
-      swordMat.color.copy(white).lerp(warn, p.telegraph);
+      // Per-limb colors: intact -> amber -> crimson (pulsing when broken) + telegraph/hurt blend
+      const pulse = 0.5 + 0.5 * Math.sin(clock.elapsedTime * 22);
+      const tint = (mat: THREE.MeshBasicMaterial, ratio: number) => {
+        if (ratio > 0.65) mat.color.copy(colors.base);
+        else if (ratio > 0.30) mat.color.copy(colors.amber);
+        else {
+          mat.color.copy(colors.crimson);
+          if (ratio <= 0) mat.color.lerp(colors.white, pulse * 0.35);
+        }
+        mat.color.lerp(colors.warn, p.telegraph).lerp(colors.white, p.hurt);
+      };
+      tint(mats.head, limbs?.head.ratio ?? 1);
+      tint(mats.torso, limbs?.torso.ratio ?? 1);
+      tint(mats.armL, limbs?.armL.ratio ?? 1);
+      tint(mats.armR, limbs?.armR.ratio ?? 1);
+      tint(mats.legL, limbs?.legL.ratio ?? 1);
+      tint(mats.legR, limbs?.legR.ratio ?? 1);
+      mats.sword.color.copy(colors.white).lerp(colors.warn, p.telegraph);
     });
 
     return (
       <group ref={group} scale={scale}>
         <group ref={root} position={[0, 0.92, 0]}>
           {/* legs hanging from pelvis origin (0, 0.92, 0) */}
-          {[['L', 0.11, hipL, kneeL], ['R', -0.11, hipR, kneeR]].map(([k, x, hip, knee]) => (
-            <group key={k as string} ref={hip as React.RefObject<THREE.Group>} position={[x as number, 0, 0]}>
-              <Dash len={0.46} w={THICK * 1.5} mat={mat} />
-              <group ref={knee as React.RefObject<THREE.Group>} position={[0, -0.46, 0]}>
-                <Dash len={0.46} w={THICK * 1.3} mat={mat} />
-              </group>
+          <group ref={hipL} position={[0.11, 0, 0]}>
+            <Dash len={0.46} w={THICK * 1.5} mat={mats.legL} />
+            <group ref={kneeL} position={[0, -0.46, 0]}>
+              <Dash len={0.46} w={THICK * 1.3} mat={mats.legL} />
             </group>
-          ))}
+          </group>
+          <group ref={hipR} position={[-0.11, 0, 0]}>
+            <Dash len={0.46} w={THICK * 1.5} mat={mats.legR} />
+            <group ref={kneeR} position={[0, -0.46, 0]}>
+              <Dash len={0.46} w={THICK * 1.3} mat={mats.legR} />
+            </group>
+          </group>
           {/* articulated torso + head + arms */}
           <group ref={upper} position={[0, 0.04, 0]}>
-            <mesh position={[0, 0.30, 0]} material={mat}><boxGeometry args={[THICK * 1.3, 0.56, THICK * 1.3]} /></mesh>
+            <mesh position={[0, 0.30, 0]} material={mats.torso}><boxGeometry args={[THICK * 1.3, 0.56, THICK * 1.3]} /></mesh>
             <group ref={head} position={[0, 0.72, 0]}>
-              <mesh position={[0, 0.18, 0]} material={mat}><boxGeometry args={[THICK, 0.22, THICK]} /></mesh>
+              <mesh position={[0, 0.18, 0]} material={mats.head}><boxGeometry args={[THICK, 0.22, THICK]} /></mesh>
             </group>
             {/* left arm (+X) + shield */}
             <group ref={shL} position={[0.22, 0.58, 0]} rotation={[0, 0, 0.18]}>
-              <Dash len={0.34} mat={mat} />
+              <Dash len={0.34} mat={mats.armL} />
               <group ref={elL} position={[0, -0.34, 0]}>
-                <Dash len={0.32} mat={mat} />
-                <mesh position={[0.06, -0.26, 0.12]} rotation={[0, Math.PI / 2, 0]} material={mat}>
+                <Dash len={0.32} mat={mats.armL} />
+                <mesh position={[0.06, -0.26, 0.12]} rotation={[0, Math.PI / 2, 0]} material={mats.armL}>
                   <ringGeometry args={[0.22, 0.29, 10]} />
                 </mesh>
               </group>
             </group>
             {/* right arm (-X) + sword */}
             <group ref={shR} position={[-0.22, 0.58, 0]} rotation={[0, 0, -0.18]}>
-              <Dash len={0.34} mat={mat} />
+              <Dash len={0.34} mat={mats.armR} />
               <group ref={elR} position={[0, -0.34, 0]}>
-                <Dash len={0.32} mat={mat} />
+                <Dash len={0.32} mat={mats.armR} />
                 <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
-                  <mesh position={[0, -0.44, 0]} material={swordMat}><boxGeometry args={[0.055, 0.92, 0.055]} /></mesh>
+                  <mesh position={[0, -0.44, 0]} material={mats.sword}><boxGeometry args={[0.055, 0.92, 0.055]} /></mesh>
                 </group>
               </group>
             </group>

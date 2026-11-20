@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { STATIONS } from './world/layout';
 import { useGame } from './store';
-import { useArena } from './arena/arenaStore';
+import { useArena, type LimbHud } from './arena/arenaStore';
 import { boonById } from './arena/boons';
+import { type LimbKey } from './arena/combat';
 import { LADDER, LOOKS } from './arena/run';
 
 function Fps() {
@@ -119,12 +120,53 @@ function CalloutFlash() {
     <div
       style={{
         position: 'absolute', top: '24%', left: '50%', transform: 'translateX(-50%)',
-        fontSize: 28, letterSpacing: '.35em', color: callout.color,
-        textShadow: `0 0 22px ${callout.color}`, fontFamily: 'Termitesse, Menlo, monospace',
+        fontSize: 24, letterSpacing: '.28em', color: callout.color, fontWeight: 700,
+        textShadow: `0 0 22px ${callout.color}`, fontFamily: 'Menlo, "SF Mono", monospace',
+        whiteSpace: 'nowrap',
       }}
     >
       {callout.text}
     </div>
+  );
+}
+
+const DOLL_SEGMENTS: { key: LimbKey; x1: number; y1: number; x2: number; y2: number }[] = [
+  { key: 'head',  x1: 22, y1: 4,  x2: 22, y2: 13 },
+  { key: 'torso', x1: 22, y1: 16, x2: 22, y2: 34 },
+  { key: 'armL',  x1: 17, y1: 17, x2: 10, y2: 32 },
+  { key: 'armR',  x1: 27, y1: 17, x2: 34, y2: 32 },
+  { key: 'legL',  x1: 19, y1: 37, x2: 14, y2: 59 },
+  { key: 'legR',  x1: 25, y1: 37, x2: 30, y2: 59 },
+];
+
+/** Nostalgaia-style stick paper-doll showing live limb integrity and severed gaps. */
+function LimbDoll({ limbs, size = 56 }: { limbs: LimbHud; size?: number }) {
+  return (
+    <svg
+      width={Math.round((size * 44) / 64)}
+      height={size}
+      viewBox="0 0 44 64"
+      style={{ background: '#06050dbb', border: '1px solid #e9e6ff28', padding: 2, flexShrink: 0 }}
+    >
+      {DOLL_SEGMENTS.map((seg) => {
+        const l = limbs[seg.key];
+        const severed = l.s;
+        const crit = !severed && l.r <= 0.30;
+        const color = severed ? '#e9e6ff' : crit ? '#ff3b5c' : l.r <= 0.65 ? '#ffc95c' : '#e9e6ff';
+        return (
+          <line
+            key={seg.key}
+            x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
+            stroke={color}
+            strokeWidth={severed ? 2 : 3}
+            strokeLinecap="square"
+            strokeDasharray={severed ? '2 2' : undefined}
+            opacity={severed ? 0.18 : 1}
+            className={crit ? 'limb-crit' : undefined}
+          />
+        );
+      })}
+    </svg>
   );
 }
 
@@ -136,9 +178,14 @@ function ArenaHud() {
   return (
     <>
       <div style={{ position: 'absolute', top: 54, left: 22, display: 'grid', gap: 6 }}>
-        <Bar v={a.hp} max={a.maxHp} color="#ff4f6d" />
-        <Bar v={a.st} max={a.maxSt} color="#4dffa0" w={200} />
-        <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: '.15em' }}>BOUT {a.bout} / {LADDER.length}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <LimbDoll limbs={a.playerLimbs} size={58} />
+          <div style={{ display: 'grid', gap: 6 }}>
+            <Bar v={a.hp} max={a.maxHp} color="#ff4f6d" w={190} />
+            <Bar v={a.st} max={a.maxSt} color="#4dffa0" w={150} />
+            <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: '.15em' }}>BOUT {a.bout} / {LADDER.length}</div>
+          </div>
+        </div>
         <div
           style={{
             display: 'inline-block', justifySelf: 'start', fontSize: 11, letterSpacing: '.14em',
@@ -157,11 +204,14 @@ function ArenaHud() {
         )}
         <BoonList ids={a.boons} />
       </div>
-      <div style={{ position: 'absolute', top: 54, left: '50%', transform: 'translateX(-50%)', display: 'grid', gap: 6, justifyItems: 'center' }}>
+      <div style={{ position: 'absolute', top: 54, left: '50%', transform: 'translateX(-50%)', display: 'grid', gap: 8, justifyItems: 'center' }}>
         {a.enemies.filter((e) => e.hp > 0).map((e) => (
-          <div key={e.id} style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
-            <div style={{ letterSpacing: '.3em', fontSize: 13, color: '#ff6b6b' }}>{e.name}</div>
-            <Bar v={e.hp} max={e.max} color="#ff6b6b" w={320} />
+          <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
+              <div style={{ letterSpacing: '.3em', fontSize: 13, color: '#ff6b6b' }}>{e.name}</div>
+              <Bar v={e.hp} max={e.max} color="#ff6b6b" w={210} />
+            </div>
+            <LimbDoll limbs={e.limbs} size={44} />
           </div>
         ))}
       </div>

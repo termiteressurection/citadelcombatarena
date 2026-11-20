@@ -4,6 +4,28 @@ export type Kind = 'player' | 'skirmisher' | 'brute' | 'champion';
 export type State = 'idle' | 'windup' | 'strike' | 'recover' | 'dodge' | 'stagger' | 'dead';
 export type Atk = 'light' | 'light2' | 'light3' | 'heavy' | 'bash';
 
+export type LimbKey = 'head' | 'torso' | 'armL' | 'armR' | 'legL' | 'legR';
+export const LIMB_KEYS: readonly LimbKey[] = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
+export interface Limb { hp: number; max: number; severed: boolean }
+export type Limbs = Record<LimbKey, Limb>;
+
+export function makeLimbs(maxHp: number): Limbs {
+  const part = (pct: number): Limb => {
+    const max = Math.max(1, Math.round(maxHp * pct));
+    return { hp: max, max, severed: false };
+  };
+  return {
+    head: part(0.52),
+    torso: part(1.0),
+    armL: part(0.36),
+    armR: part(0.40),
+    legL: part(0.34),
+    legR: part(0.34),
+  };
+}
+
+export type TargetGroup = 'armL' | 'armR' | 'leg' | 'head';
+
 export interface Attack {
   windup: number;
   strike: number;
@@ -14,15 +36,17 @@ export interface Attack {
   half: number;
   knock: number;
   lunge: number;
+  zone: TargetGroup;
+  limbMul: number;
   guardBreak?: boolean;
 }
 
 export const ATTACKS: Record<Atk, Attack> = {
-  light:  { windup: 0.2,  strike: 0.1,  recover: 0.26, dmg: 12, stamina: 12, reach: 2.45, half: Math.PI / 3,   knock: 4.5,  lunge: 4.5 },
-  light2: { windup: 0.16, strike: 0.1,  recover: 0.26, dmg: 14, stamina: 12, reach: 2.55, half: Math.PI / 2.7, knock: 5.5,  lunge: 5.2 },
-  light3: { windup: 0.24, strike: 0.12, recover: 0.42, dmg: 22, stamina: 16, reach: 2.8,  half: Math.PI / 2.5, knock: 10,   lunge: 7.5 },
-  heavy:  { windup: 0.5,  strike: 0.12, recover: 0.52, dmg: 30, stamina: 26, reach: 2.8,  half: Math.PI / 3,   knock: 13.5, lunge: 6.5 },
-  bash:   { windup: 0.18, strike: 0.1,  recover: 0.34, dmg: 5,  stamina: 14, reach: 2.1,  half: Math.PI / 3.2, knock: 8,    lunge: 5.5, guardBreak: true },
+  light:  { windup: 0.2,  strike: 0.1,  recover: 0.26, dmg: 12, stamina: 12, reach: 2.45, half: Math.PI / 3,   knock: 4.5,  lunge: 4.5, zone: 'armL', limbMul: 1.15 },
+  light2: { windup: 0.16, strike: 0.1,  recover: 0.26, dmg: 14, stamina: 12, reach: 2.55, half: Math.PI / 2.7, knock: 5.5,  lunge: 5.2, zone: 'armR', limbMul: 1.15 },
+  light3: { windup: 0.24, strike: 0.12, recover: 0.42, dmg: 22, stamina: 16, reach: 2.8,  half: Math.PI / 2.5, knock: 10,   lunge: 7.5, zone: 'leg',  limbMul: 1.25 },
+  heavy:  { windup: 0.5,  strike: 0.12, recover: 0.52, dmg: 30, stamina: 26, reach: 2.8,  half: Math.PI / 3,   knock: 13.5, lunge: 6.5, zone: 'head', limbMul: 1.25 },
+  bash:   { windup: 0.18, strike: 0.1,  recover: 0.34, dmg: 5,  stamina: 14, reach: 2.1,  half: Math.PI / 3.2, knock: 8,    lunge: 5.5, zone: 'leg',  limbMul: 1.4, guardBreak: true },
 };
 
 export interface Stats {
@@ -62,6 +86,7 @@ export interface Fighter {
   id: number; kind: Kind; team: 'p' | 'e'; stats: Stats;
   x: number; z: number; vx: number; vz: number; yaw: number;
   hp: number; maxHp: number; stamina: number; maxStamina: number; staminaDelay: number;
+  limbs: Limbs;
   state: State; atk: Atk | null; t: number; stagger: number;
   blocking: boolean; blockT: number; iframes: number;
   dodgeX: number; dodgeZ: number; kx: number; kz: number;
@@ -76,13 +101,19 @@ export interface Intent { moveX: number; moveZ: number; light: boolean; heavy: b
 export const NO_INTENT: Intent = { moveX: 0, moveZ: 0, light: false, heavy: false, bash: false, block: false, dodge: false };
 
 export type HitType = 'hit' | 'block' | 'parry' | 'guardBreak' | 'kill';
-export interface HitEvent { type: HitType; attacker: number; victim: number; dmg: number; heavy: boolean; atk: Atk; dx: number; dz: number; x: number; z: number }
+export interface HitEvent {
+  type: HitType; attacker: number; victim: number; dmg: number; heavy: boolean; atk: Atk;
+  dx: number; dz: number; x: number; z: number;
+  zone: LimbKey; broken?: LimbKey; severed?: LimbKey; decap?: boolean;
+}
 
 export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: Mods = defaultMods()): Fighter {
   const stats = KINDS[kind];
+  const maxHp = stats.hp + mods.maxHp;
   return {
     id, kind, team: kind === 'player' ? 'p' : 'e', stats, x, z, vx: 0, vz: 0, yaw: 0,
-    hp: stats.hp + mods.maxHp, maxHp: stats.hp + mods.maxHp, stamina: stats.stamina + mods.maxStamina, maxStamina: stats.stamina + mods.maxStamina, staminaDelay: 0,
+    hp: maxHp, maxHp, stamina: stats.stamina + mods.maxStamina, maxStamina: stats.stamina + mods.maxStamina, staminaDelay: 0,
+    limbs: makeLimbs(maxHp),
     state: 'idle', atk: null, t: 0, stagger: 0, blocking: false, blockT: 0, iframes: 0,
     dodgeX: 0, dodgeZ: 0, kx: 0, kz: 0,
     comboStep: 0, comboTimer: 0, queuedAtk: null,
@@ -93,11 +124,27 @@ export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: 
   };
 }
 
-const wind = (f: Fighter, a: Atk) => ATTACKS[a].windup * f.stats.windupMul;
+const wind = (f: Fighter, a: Atk) => {
+  const crippledArm = f.limbs.armR.hp <= 0 && !f.limbs.armR.severed ? 1.25 : 1;
+  return ATTACKS[a].windup * f.stats.windupMul * crippledArm;
+};
 const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
+
+export function pickTargetZone(atk: Atk, v: Fighter): LimbKey {
+  const grp = ATTACKS[atk].zone;
+  if (grp === 'armL') return v.limbs.armL.hp > 0 && !v.limbs.armL.severed ? 'armL' : 'torso';
+  if (grp === 'armR') return v.limbs.armR.hp > 0 && !v.limbs.armR.severed ? 'armR' : 'torso';
+  if (grp === 'leg') {
+    if (v.limbs.legL.hp > 0 && !v.limbs.legL.severed) return 'legL';
+    if (v.limbs.legR.hp > 0 && !v.limbs.legR.severed) return 'legR';
+    return 'torso';
+  }
+  return 'head';
+}
 
 export function startAttack(f: Fighter, a: Atk): boolean {
   if (f.state !== 'idle') return false;
+  if (f.limbs.armR.severed && a !== 'bash') return false;
   const at = ATTACKS[a];
   if (f.stamina < at.stamina) return false;
   f.stamina -= at.stamina; f.staminaDelay = 0.7;
@@ -142,10 +189,13 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   }
 
   if ((f.state === 'strike' || f.state === 'recover') && (f.atk === 'light' || f.atk === 'light2')) {
-    if (i.light) f.queuedAtk = f.atk === 'light' ? 'light2' : 'light3';
-    else if (i.heavy) f.queuedAtk = 'heavy';
+    if (i.light && !f.limbs.armR.severed) f.queuedAtk = f.atk === 'light' ? 'light2' : 'light3';
+    else if (i.heavy && !f.limbs.armR.severed) f.queuedAtk = 'heavy';
     else if (i.bash) f.queuedAtk = 'bash';
   }
+
+  const brokenLegs = (f.limbs.legL.hp <= 0 ? 1 : 0) + (f.limbs.legR.hp <= 0 ? 1 : 0);
+  const legSpeedMul = brokenLegs === 0 ? 1 : brokenLegs === 1 ? 0.55 : 0.42;
 
   let speedMul = 1;
   switch (f.state) {
@@ -162,8 +212,8 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
       if (f.t >= wind(f, f.atk!)) {
         const at = ATTACKS[f.atk!];
         f.state = 'strike'; f.t = 0; strikeFrame = true;
-        f.kx += Math.sin(f.yaw) * at.lunge;
-        f.kz += Math.cos(f.yaw) * at.lunge;
+        f.kx += Math.sin(f.yaw) * at.lunge * legSpeedMul;
+        f.kz += Math.cos(f.yaw) * at.lunge * legSpeedMul;
       }
       break;
     case 'strike':
@@ -181,11 +231,12 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
       }
       break;
     case 'idle': {
-      const wantBlock = i.block && f.stamina > 1;
+      const canBlock = f.limbs.armL.hp > 0 && !f.limbs.armL.severed;
+      const wantBlock = canBlock && i.block && f.stamina > 1;
       if (wantBlock && !f.blocking) f.blockT = 0;
       f.blocking = wantBlock;
       if (f.blocking) f.blockT += dt;
-      if (i.dodge && f.stamina >= dodgeCostOf(f)) {
+      if (i.dodge && brokenLegs === 0 && f.stamina >= dodgeCostOf(f)) {
         const len = Math.hypot(i.moveX, i.moveZ);
         f.dodgeX = len > 0.1 ? i.moveX / len : -Math.sin(f.yaw);
         f.dodgeZ = len > 0.1 ? i.moveZ / len : -Math.cos(f.yaw);
@@ -210,7 +261,7 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   }
   if (f.state !== 'dodge') {
     const len = Math.hypot(i.moveX, i.moveZ) || 1;
-    const sp = f.stats.speed * f.mods.speed * speedMul * Math.min(1, Math.hypot(i.moveX, i.moveZ));
+    const sp = f.stats.speed * f.mods.speed * speedMul * legSpeedMul * Math.min(1, Math.hypot(i.moveX, i.moveZ));
     const tx = (i.moveX / len) * sp, tz = (i.moveZ / len) * sp;
     const a = 1 - Math.exp(-14 * dt);
     f.vx += (tx - f.vx) * a; f.vz += (tz - f.vz) * a;
@@ -231,6 +282,8 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
   if (!a.atk) return out;
   const at = ATTACKS[a.atk];
   const heavy = a.atk === 'heavy';
+  const armMul = a.limbs.armR.hp <= 0 && !a.limbs.armR.severed ? 0.65 : 1;
+
   for (const v of victims) {
     if (v.state === 'dead' || v.team === a.team || v.iframes > 0) continue;
     const dx = v.x - a.x, dz = v.z - a.z, d = Math.hypot(dx, dz) || 1e-6;
@@ -238,44 +291,70 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
     const ang = Math.atan2(dx, dz) - a.yaw;
     if (Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) > at.half) continue;
     const ux = dx / d, uz = dz / d;
-    const dmg = at.dmg * a.stats.dmgMul * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1);
+    const dmg = at.dmg * a.stats.dmgMul * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1) * armMul;
     const base = { attacker: a.id, victim: v.id, heavy, atk: a.atk, dx: ux, dz: uz, x: (a.x + v.x) / 2, z: (a.z + v.z) / 2 };
 
-    // blocking: shield must face the attacker
+    // blocking: shield arm must be intact and shield must face the attacker
+    const canBlock = v.limbs.armL.hp > 0 && !v.limbs.armL.severed;
     const faceAng = Math.atan2(-dx, -dz) - v.yaw;
     const facing = Math.abs(Math.atan2(Math.sin(faceAng), Math.cos(faceAng))) <= BLOCK_ARC;
-    if (v.blocking && v.state === 'idle' && facing) {
+    if (canBlock && v.blocking && v.state === 'idle' && facing) {
       if (at.guardBreak) {
         v.blocking = false;
         v.stamina = Math.max(0, v.stamina - 30);
         v.staminaDelay = 1.2;
         v.hp = Math.max(1, v.hp - dmg);
+        v.limbs.armL.hp = Math.max(1, v.limbs.armL.hp - dmg * 1.2);
         v.kx += ux * at.knock; v.kz += uz * at.knock;
         stagger(v, 0.95);
-        out.push({ ...base, type: 'guardBreak', dmg });
+        out.push({ ...base, type: 'guardBreak', dmg, zone: 'armL' });
       } else if (v.blockT <= PARRY_WINDOW + v.mods.parryWindow) {
         stagger(a, 0.9);
         v.stamina = Math.min(v.maxStamina, v.stamina + 15);
-        out.push({ ...base, type: 'parry', dmg: 0 });
+        out.push({ ...base, type: 'parry', dmg: 0, zone: 'armL' });
       } else {
         const chip = dmg * 0.15;
         v.hp = Math.max(1, v.hp - chip);
+        v.limbs.armL.hp = Math.max(1, v.limbs.armL.hp - dmg * 0.25);
         v.stamina -= dmg * 0.9 * (1 - v.mods.blockStam); v.staminaDelay = 1;
         if (v.mods.thorns > 0) a.hp = Math.max(1, a.hp - v.mods.thorns);
         v.kx += ux * at.knock * 0.3; v.kz += uz * at.knock * 0.3;
         if (v.stamina <= 0) { v.stamina = 0; stagger(v, 0.7); }
-        out.push({ ...base, type: 'block', dmg: chip });
+        out.push({ ...base, type: 'block', dmg: chip, zone: 'armL' });
       }
       continue;
     }
+
+    const zone = pickTargetZone(a.atk, v);
     v.hp -= dmg;
+    const limb = v.limbs[zone];
+    const wasIntact = limb.hp > 0;
+    limb.hp = Math.max(0, limb.hp - dmg * at.limbMul);
+
+    let broken: LimbKey | undefined;
+    let severed: LimbKey | undefined;
+    let decap = false;
+    if (wasIntact && limb.hp === 0) {
+      broken = zone;
+      if (zone === 'head') {
+        limb.severed = true; severed = 'head'; decap = true; v.hp = 0;
+      } else if (zone === 'armL') {
+        limb.severed = true; severed = 'armL'; v.blocking = false;
+      } else if (zone === 'armR' && v.team === 'e') {
+        limb.severed = true; severed = 'armR';
+      } else if ((zone === 'legL' || zone === 'legR') && v.team === 'e') {
+        limb.severed = true; severed = zone;
+        if (v.limbs.legL.severed && v.limbs.legR.severed) v.hp = 0;
+      }
+    }
+
     v.kx += ux * at.knock; v.kz += uz * at.knock;
     if (v.hp <= 0) {
       v.hp = 0; v.state = 'dead'; v.atk = null; v.blocking = false;
-      out.push({ ...base, type: 'kill', dmg });
+      out.push({ ...base, type: 'kill', dmg, zone, broken, severed, decap });
     } else {
-      stagger(v, heavy ? 0.45 : at.guardBreak ? 0.35 : 0.18);
-      out.push({ ...base, type: 'hit', dmg });
+      stagger(v, broken ? 0.65 : heavy ? 0.45 : at.guardBreak ? 0.35 : 0.18);
+      out.push({ ...base, type: 'hit', dmg, zone, broken, severed });
     }
   }
   return out;
@@ -288,10 +367,21 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number): Intent {
   const dx = target.x - f.x, dz = target.z - f.z, d = Math.hypot(dx, dz) || 1e-6;
   const fx = dx / d, fz = dz / d;
   const it: Intent = { moveX: 0, moveZ: 0, light: false, heavy: false, bash: false, block: false, dodge: false };
-  if (target.state === 'dead' || f.state !== 'idle') return it;
+  if (target.state === 'dead') return it;
+
+  const disarmed = f.limbs.armR.severed;
+  const canBlock = f.limbs.armL.hp > 0 && !f.limbs.armL.severed;
+  const canDodge = f.limbs.legL.hp > 0 && f.limbs.legR.hp > 0;
+
+  if (f.kind === 'skirmisher' && f.state === 'recover' && f.atk === 'light' && !f.queuedAtk && !disarmed && ai.strafe === 1 && f.stamina >= ATTACKS.light2.stamina && d < 3.4) {
+    it.light = true;
+    return it;
+  }
+
+  if (f.state !== 'idle') return it;
   ai.timer += dt;
 
-  if (ai.blockTimer > 0) {
+  if (canBlock && ai.blockTimer > 0) {
     ai.blockTimer = Math.max(0, ai.blockTimer - dt);
     it.block = true;
     const radial = (d - cfg.dist) * 0.4;
@@ -302,10 +392,10 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number): Intent {
 
   // read the player's windup and sometimes dodge or block it
   if (target.state === 'windup' && d < 3.4) {
-    if (cfg.dodgeChance > 0 && f.stamina >= dodgeCostOf(f) && Math.random() < cfg.dodgeChance * dt * 6) {
+    if (canDodge && cfg.dodgeChance > 0 && f.stamina >= dodgeCostOf(f) && Math.random() < cfg.dodgeChance * dt * 6) {
       it.dodge = true; it.moveX = -fz * ai.strafe; it.moveZ = fx * ai.strafe; return it;
     }
-    if ((cfg.blockChance ?? 0) > 0 && f.stamina > 20 && Math.random() < (cfg.blockChance ?? 0) * dt * 5) {
+    if (canBlock && (cfg.blockChance ?? 0) > 0 && f.stamina > 20 && Math.random() < (cfg.blockChance ?? 0) * dt * 5) {
       ai.blockTimer = 0.55;
       it.block = true;
       return it;
@@ -322,15 +412,23 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number): Intent {
   const radial = (d - cfg.dist) * 0.8;
   it.moveX = fx * radial + -fz * ai.strafe * 0.8;
   it.moveZ = fz * radial + fx * ai.strafe * 0.8;
-  if ((cfg.blockChance ?? 0) > 0 && d < cfg.dist + 1.2 && ai.timer < ai.next * 0.7 && f.stamina > 30 && Math.random() < (cfg.blockChance ?? 0) * dt * 0.6) {
+  if (canBlock && (cfg.blockChance ?? 0) > 0 && d < cfg.dist + 1.2 && ai.timer < ai.next * 0.7 && f.stamina > 30 && Math.random() < (cfg.blockChance ?? 0) * dt * 0.6) {
     ai.blockTimer = 0.5;
     it.block = true;
     return it;
   }
+  if (disarmed) {
+    if (ai.timer > ai.next && d < 2.2 && f.stamina >= ATTACKS.bash.stamina) {
+      it.bash = true;
+      ai.mode = 'retreat'; ai.timer = 0;
+    }
+    return it;
+  }
   if (ai.timer > ai.next && d < cfg.dist + 0.9) {
-    const a: Atk = Math.random() < cfg.heavyChance ? 'heavy' : 'light';
+    const r = Math.random();
+    const a: Atk = f.kind === 'brute' && r > 0.85 ? 'bash' : r < cfg.heavyChance ? 'heavy' : 'light';
     if (f.stamina >= ATTACKS[a].stamina) {
-      if (a === 'heavy') it.heavy = true; else it.light = true;
+      if (a === 'heavy') it.heavy = true; else if (a === 'bash') it.bash = true; else it.light = true;
       ai.mode = 'retreat'; ai.timer = 0;
     }
   }

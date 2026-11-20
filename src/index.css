@@ -19,3 +19,8 @@ canvas { display: block; }
 .panel p { color: #a78bfa; letter-spacing: .12em; }
 .btn { font-family: inherit; letter-spacing: .25em; padding: 12px 26px; background: #06050d; color: #3ff0ff; border: 1px solid #3ff0ff; cursor: pointer; font-size: 15px; box-shadow: 0 0 16px #3ff0ff44; justify-self: center; }
 .btn:hover { background: #3ff0ff22; }
+@keyframes limbPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.limb-crit { animation: limbPulse 0.45s ease-in-out infinite; }
