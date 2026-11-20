@@ -7,18 +7,72 @@
 html, body, #root { height: 100%; }
 body { background: #06050d; color: #e9e6ff; overflow: hidden; font-family: 'Menlo', 'SF Mono', monospace; user-select: none; }
 canvas { display: block; }
-.hud { position: fixed; inset: 0; pointer-events: none; }
+.hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
 .hud * { pointer-events: none; }
 .hud .clickable, .hud .clickable * { pointer-events: auto; }
-.title, .panel h1 { font-family: 'Termitesse', 'Menlo', monospace; }
-.title { position: absolute; top: 18px; left: 22px; letter-spacing: .35em; font-size: 18px; color: #ffc95c; text-shadow: 0 0 12px #ffc95c88; }
-.hint { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border: 1px solid #3ff0ff88; background: #06050dcc; color: #3ff0ff; letter-spacing: .15em; font-size: 15px; box-shadow: 0 0 18px #3ff0ff33; }
-.controls { position: absolute; bottom: 16px; left: 22px; font-size: 12px; opacity: .55; line-height: 1.6; }
-.panel { position: absolute; inset: 0; display: grid; place-content: center; background: #06050dd9; text-align: center; gap: 14px; }
-.panel h1 { color: #ffc95c; letter-spacing: .4em; font-size: 34px; text-shadow: 0 0 20px #ffc95c88; }
-.panel p { color: #a78bfa; letter-spacing: .12em; }
-.btn { font-family: inherit; letter-spacing: .25em; padding: 12px 26px; background: #06050d; color: #3ff0ff; border: 1px solid #3ff0ff; cursor: pointer; font-size: 15px; box-shadow: 0 0 16px #3ff0ff44; justify-self: center; }
-.btn:hover { background: #3ff0ff22; }
+.title, .panel h1, .ps1-heading { font-family: 'Termitesse', 'Menlo', monospace; }
+.title {
+  position: absolute; top: 16px; left: 20px;
+  letter-spacing: .32em; font-size: 17px; color: #ffc95c;
+  text-shadow: 2px 2px 0 #07050c, 0 0 12px #ffc95c66;
+}
+.hint {
+  position: absolute; bottom: 56px; left: 50%; transform: translateX(-50%);
+  padding: 10px 18px; border: 2px solid #c99b43; background: #0d0919eb;
+  color: #ffc95c; letter-spacing: .16em; font-size: 14px;
+  box-shadow: inset 1px 1px 0 #ffe29944, inset -2px -2px 0 #05030a, 3px 3px 0 #040208;
+}
+.controls {
+  position: absolute; bottom: 14px; left: 18px;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  font-size: 11px; letter-spacing: .06em; color: #cfc6e8;
+}
+.panel {
+  position: absolute; inset: 0; display: grid; place-content: center;
+  background: #06050dd6; text-align: center; gap: 14px;
+}
+.panel h1 { color: #ffc95c; letter-spacing: .35em; font-size: 32px; text-shadow: 2px 2px 0 #05030a, 0 0 18px #ffc95c66; }
+.panel p { color: #c7b8eb; letter-spacing: .1em; font-size: 13px; }
+.ps1-box {
+  background: #0d0919ec;
+  border: 2px solid #c99b43;
+  box-shadow:
+    inset 1px 1px 0 #ffe59f44,
+    inset -2px -2px 0 #05030b,
+    0 0 0 2px #07050c,
+    4px 4px 0 #040208;
+  padding: 18px 22px;
+}
+.ps1-armory-drawer {
+  position: absolute; top: 52px; right: 20px; bottom: 56px; width: min(400px, 46vw);
+  display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+  text-align: left; pointer-events: auto;
+}
+.btn {
+  font-family: inherit; letter-spacing: .2em; padding: 10px 20px;
+  background: linear-gradient(180deg, #1b142c 0%, #0e0a19 100%);
+  color: #ffc95c; border: 2px solid #c99b43; cursor: pointer; font-size: 13px;
+  box-shadow: inset 1px 1px 0 #ffe29944, inset -2px -2px 0 #05030a, 2px 2px 0 #040208;
+  justify-self: center; transition: background .08s, transform .05s;
+}
+.btn:hover:not(:disabled) { background: #261b3e; color: #fff2c2; }
+.btn:active:not(:disabled) { transform: translate(1px, 1px); box-shadow: inset 1px 1px 0 #05030a; }
+.ps1-key {
+  display: inline-block; padding: 2px 6px;
+  background: #140f24; color: #ffc95c; border: 1px solid #c99b43;
+  box-shadow: inset 0 -1px 0 #05030a, 1px 1px 0 #040208;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+}
+.ps1-bar-track {
+  position: relative; height: 13px;
+  background: #07050e; border: 2px solid #6e5a88;
+  box-shadow: inset 1px 1px 0 #030208, 2px 2px 0 #040208;
+  overflow: hidden;
+}
+.ps1-bar-fill {
+  height: 100%; transition: width .07s linear;
+  background-image: repeating-linear-gradient(90deg, transparent 0px, transparent 10px, rgba(0, 0, 0, 0.25) 10px, rgba(0, 0, 0, 0.25) 12px);
+}
 @keyframes limbPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }

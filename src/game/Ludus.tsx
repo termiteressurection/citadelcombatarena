@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { Gladiator, type GladiatorHandle } from './Gladiator';
 import { Stations } from './Stations';
 import { StaticBatch } from './art/StaticBatch';
-import { SynthwaveHorizon } from './art/SynthwaveHorizon';
+import { Brazier, Ps1Sky } from './art/Ps1Sky';
+import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import { SurrealSpores } from './art/SurrealSpores';
 import Starfield from './art/Starfield';
 import { CorinthianColumn, DoricColumn, IonicColumn } from './art/ClassicalColumns';
@@ -41,62 +42,99 @@ function Colonnade({ playerPos }: { playerPos: PosRef }) {
   );
 }
 
-/** Low glowing parapet: the visible edge of the walkable court. It is the only boundary. */
+/** Chunky textured PS1 stone parapet walls & corner braziers framing the walkable temple sanctuary. */
 function Parapet() {
   const { minX, maxX, minZ, maxZ } = BOUNDS;
   const w = maxX - minX, d = maxZ - minZ, cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  const mats = useMemo(() => ({
+    wall: makePs1Material({ color: '#c4b8d6', map: cloneTex(getPs1Texture('stone'), 18, 1) }),
+    trim: makePs1Material({ color: '#ffd480', map: cloneTex(getPs1Texture('bronze'), 12, 1) }),
+  }), []);
   const seg = (x: number, z: number, sx: number, sz: number, k: string) => (
-    <group key={k} position={[x, 0.6, z]}>
-      <mesh><boxGeometry args={[sx, 1.2, sz]} /><meshBasicMaterial color="#0b051b" /></mesh>
-      <mesh><boxGeometry args={[sx + 0.05, 1.25, sz + 0.05]} /><meshBasicMaterial color="#a78bfa" wireframe transparent opacity={0.7} /></mesh>
+    <group key={k} position={[x, 0, z]}>
+      <mesh position={[0, 0.7, 0]} material={mats.wall}><boxGeometry args={[sx, 1.4, sz]} /></mesh>
+      <mesh position={[0, 1.46, 0]} material={mats.trim}><boxGeometry args={[sx + 0.12, 0.16, sz + 0.12]} /></mesh>
     </group>
   );
   return (
     <group>
-      {seg(cx, minZ - 0.4, w + 1.6, 0.8, 'n')}
-      {seg(cx, maxZ + 0.4, w + 1.6, 0.8, 's')}
-      {seg(minX - 0.4, cz, 0.8, d, 'w')}
-      {seg(maxX + 0.4, cz, 0.8, d, 'e')}
+      {seg(cx, minZ - 0.5, w + 1.8, 0.9, 'n')}
+      {seg(cx, maxZ + 0.5, w + 1.8, 0.9, 's')}
+      {seg(minX - 0.5, cz, 0.9, d, 'w')}
+      {seg(maxX + 0.5, cz, 0.9, d, 'e')}
+      <Brazier position={[minX + 1.5, 1.5, maxZ - 1.5]} scale={0.85} />
+      <Brazier position={[maxX - 1.5, 1.5, maxZ - 1.5]} scale={0.85} />
+      <Brazier position={[minX + 1.5, 1.5, minZ + 1.5]} scale={0.85} />
+      <Brazier position={[maxX - 1.5, 1.5, minZ + 1.5]} scale={0.85} />
+      <Brazier position={[-7, 0, 15]} scale={0.9} light />
+      <Brazier position={[7, 0, 15]} scale={0.9} />
     </group>
   );
 }
 
-/** Replaces the Citadel's full-screen grid shader (too heavy for 60 FPS here) with plain line segments. */
-function CheapGrid() {
-  const geo = useMemo(() => {
-    const pts: number[] = [];
-    const R = 150, step = 6;
-    for (let v = -R; v <= R; v += step) { pts.push(v, 0.2, -R, v, 0.2, R, -R, 0.2, v, R, 0.2, v); }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    return g;
+/** Dithered PS1 flagstone temple plaza perched over a dark abyss drop-off. */
+function TempleFloor() {
+  const mats = useMemo(() => {
+    const w = BOUNDS.maxX - BOUNDS.minX + 4;
+    const d = BOUNDS.maxZ - BOUNDS.minZ + 4;
+    return {
+      floor: makePs1Material({ color: '#cfc5df', map: cloneTex(getPs1Texture('flagstone'), Math.round(w / 4), Math.round(d / 4)) }),
+      cliff: makePs1Material({ color: '#6b6080', map: cloneTex(getPs1Texture('stone'), 20, 4) }),
+      abyss: new THREE.MeshBasicMaterial({ color: '#07040e' }),
+    };
   }, []);
+  const cx = (BOUNDS.minX + BOUNDS.maxX) / 2;
+  const cz = (BOUNDS.minZ + BOUNDS.maxZ) / 2;
+  const w = BOUNDS.maxX - BOUNDS.minX + 2;
+  const d = BOUNDS.maxZ - BOUNDS.minZ + 2;
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}><circleGeometry args={[400, 32]} /><meshBasicMaterial color="#05030c" /></mesh>
-      <lineSegments geometry={geo}><lineBasicMaterial color="#7a38ee" transparent opacity={0.28} /></lineSegments>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -6.5, 0]} material={mats.abyss}><circleGeometry args={[320, 24]} /></mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0, cz]} material={mats.floor}><planeGeometry args={[w, d]} /></mesh>
+      <mesh position={[cx, -3.26, cz]} material={mats.cliff}><boxGeometry args={[w + 2, 6.4, d + 2]} /></mesh>
     </group>
   );
 }
 
 function Court() {
-  const lines = useMemo(() => {
-    const pts: number[] = [];
-    for (let z = BOUNDS.minZ; z <= BOUNDS.maxZ; z += 4) pts.push(-3, 0.24, z, 3, 0.24, z);
-    pts.push(-3, 0.24, BOUNDS.minZ, -3, 0.24, BOUNDS.maxZ, 3, 0.24, BOUNDS.minZ, 3, 0.24, BOUNDS.maxZ);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    return g;
+  const waterRef = useRef<THREE.Mesh>(null!);
+  const mats = useMemo(() => {
+    const waterTex = cloneTex(getPs1Texture('water'), 3, 3);
+    return {
+      paver: makePs1Material({ color: '#d8cfe8', map: cloneTex(getPs1Texture('stone'), 3, 18) }),
+      sidePaver: makePs1Material({ color: '#cfc5df', map: cloneTex(getPs1Texture('stone'), 8, 2) }),
+      trim: makePs1Material({ color: '#ffd480', map: getPs1Texture('bronze') }),
+      stone: makePs1Material({ color: '#cfc5df', map: cloneTex(getPs1Texture('stone'), 4, 1) }),
+      water: makePs1Material({ color: '#ffffff', map: waterTex, emissive: '#1e6e8c', emissiveIntensity: 0.35 }),
+      waterTex,
+    };
   }, []);
+
+  useFrame(({ clock }) => {
+    if (mats.waterTex) {
+      mats.waterTex.offset.x = clock.elapsedTime * 0.04;
+      mats.waterTex.offset.y = Math.sin(clock.elapsedTime * 0.5) * 0.03;
+    }
+    if (waterRef.current) waterRef.current.position.y = 1.42 + Math.sin(clock.elapsedTime * 1.8) * 0.025;
+  });
+
   return (
     <group>
-      {/* the processional avenue to the Gate */}
-      <lineSegments geometry={lines}><lineBasicMaterial color="#ffc95c" transparent opacity={0.55} /></lineSegments>
-      {/* bronze basin */}
+      {/* Main processional avenue to the Gate */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, -4]} material={mats.paver}><planeGeometry args={[5.8, 76]} /></mesh>
+      {([-2.95, 2.95] as const).map((x) => (
+        <mesh key={x} position={[x, 0.035, -4]} material={mats.trim}><boxGeometry args={[0.18, 0.05, 76]} /></mesh>
+      ))}
+      {/* Cross walkways linking Armory <-> Basin <-> Shrine & Yard <-> Gate <-> Wall */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 8]} material={mats.sidePaver}><planeGeometry args={[36, 4.4]} /></mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, -33]} material={mats.sidePaver}><planeGeometry args={[38, 4.2]} /></mesh>
+
+      {/* Stepped octagonal stone & bronze Sanctuary Fountain Basin */}
       <group position={[BASIN.x, 0, BASIN.z]}>
-        <mesh position={[0, 0.7, 0]}><cylinderGeometry args={[2.9, 2.4, 1.4, 20]} /><meshBasicMaterial color="#0b051b" /></mesh>
-        <mesh position={[0, 0.7, 0]}><cylinderGeometry args={[3, 2.5, 1.45, 20]} /><meshBasicMaterial color="#ffc95c" wireframe transparent opacity={0.8} /></mesh>
-        <mesh position={[0, 1.42, 0]} rotation={[-Math.PI / 2, 0, 0]}><circleGeometry args={[2.7, 28]} /><meshBasicMaterial color="#3ff0ff" transparent opacity={0.35} /></mesh>
+        <mesh position={[0, 0.16, 0]} material={mats.stone}><cylinderGeometry args={[3.4, 3.6, 0.32, 8]} /></mesh>
+        <mesh position={[0, 0.85, 0]} material={mats.stone}><cylinderGeometry args={[2.8, 2.5, 1.1, 8]} /></mesh>
+        <mesh position={[0, 1.42, 0]} rotation={[Math.PI / 2, 0, Math.PI / 8]} material={mats.trim}><torusGeometry args={[2.76, 0.16, 6, 8]} /></mesh>
+        <mesh ref={waterRef} position={[0, 1.42, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.water}><circleGeometry args={[2.65, 8]} /></mesh>
       </group>
     </group>
   );
@@ -149,24 +187,32 @@ function Player({ playerPos }: { playerPos: PosRef }) {
     clampBounds(p, PLAYER_R, BOUNDS);
     s.x = p.x; s.z = p.z;
 
+    const armoryOpen = game.panel === 'armory';
     const sp = Math.hypot(s.vx, s.vz);
-    const target = sp > 0.4 ? Math.atan2(s.vx, s.vz) : Math.atan2(fx, fz);
+    const target = armoryOpen
+      ? Math.atan2(-fx, -fz) + 0.32
+      : sp > 0.4 ? Math.atan2(s.vx, s.vz) : Math.atan2(fx, fz);
     let d = target - s.face; d = Math.atan2(Math.sin(d), Math.cos(d));
     s.face += d * (1 - Math.exp(-16 * dt));
     g.current.group.position.set(s.x, 0, s.z);
     g.current.group.rotation.y = s.face;
     const move01 = Math.min(1, sp / MOVE_SPEED);
     g.current.setMoving(move01);
-    g.current.pose.stance = 0;
+    g.current.pose.stance = THREE.MathUtils.lerp(g.current.pose.stance, armoryOpen ? 0.85 : 0, 1 - Math.exp(-10 * dt));
     g.current.pose.localVz += (move01 - g.current.pose.localVz) * (1 - Math.exp(-14 * dt));
     playerPos.current.set(s.x, 0, s.z);
 
-    // camera: exactly the Citadel socket rig
-    const lead = Math.min(sp / 60, 0.27 * 1.5) * CAMERA_MOVE_LEAD;
-    const cp = Math.cos(s.pitch), sn = Math.sin(s.pitch);
-    const lookDist = CAMERA_LOOK_AHEAD + lead;
-    s.dLook.set(s.x + fx * lookDist * cp, EYE_Y + CAMERA_LOOK_HEIGHT + lookDist * sn * 2.2, s.z + fz * lookDist * cp);
-    s.dCam.set(s.x - fx * CAMERA_SOCKET_DISTANCE, EYE_Y + CAMERA_SOCKET_HEIGHT, s.z - fz * CAMERA_SOCKET_DISTANCE);
+    // Camera: live 3D Armory close-up hero showcase, or exact Citadel socket rig
+    if (armoryOpen) {
+      s.dCam.set(s.x - fx * 3.05 + rx * 0.65, 1.78, s.z - fz * 3.05 + rz * 0.65);
+      s.dLook.set(s.x + rx * 0.72, 1.15, s.z + rz * 0.72);
+    } else {
+      const lead = Math.min(sp / 60, 0.27 * 1.5) * CAMERA_MOVE_LEAD;
+      const cp = Math.cos(s.pitch), sn = Math.sin(s.pitch);
+      const lookDist = CAMERA_LOOK_AHEAD + lead;
+      s.dLook.set(s.x + fx * lookDist * cp, EYE_Y + CAMERA_LOOK_HEIGHT + lookDist * sn * 2.2, s.z + fz * lookDist * cp);
+      s.dCam.set(s.x - fx * CAMERA_SOCKET_DISTANCE, EYE_Y + CAMERA_SOCKET_HEIGHT, s.z - fz * CAMERA_SOCKET_DISTANCE);
+    }
     const alpha = 1 - Math.pow(1 - CAMERA_LERP, dt * 60);
     s.cam.lerp(s.dCam, alpha);
     s.lookAt.lerp(s.dLook, alpha);
@@ -228,11 +274,14 @@ export function Ludus() {
   const playerPos = useRef(new THREE.Vector3(PLAYER_START.x, 0, PLAYER_START.z));
   return (
     <>
-      <color attach="background" args={['#06050d']} />
-      <fog attach="fog" args={['#0a0620', 70, 230]} />
-      <SynthwaveHorizon />
+      <color attach="background" args={['#0b0818']} />
+      <fog attach="fog" args={['#140e26', 30, 125]} />
+      <hemisphereLight args={['#8a80d0', '#23182e', 0.9]} />
+      <directionalLight position={[20, 32, 16]} intensity={1.25} color="#ffdba8" />
+      <directionalLight position={[-18, 16, -24]} intensity={0.45} color="#6cd0ff" />
+      <Ps1Sky mood="ludus" />
       <Starfield playerPosRef={playerPos} />
-      <CheapGrid />
+      <TempleFloor />
       <SurrealSpores />
       <Court />
       <Parapet />

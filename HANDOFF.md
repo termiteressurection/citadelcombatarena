@@ -24,19 +24,25 @@ Unrelated to the Citadel project; repo is only a source of art/tech. Ludus = cal
   - 5 distinct gladiator styles (`src/game/arena/styles.ts`): **Murmillo** (gladius + scutum + crested helm), **Dimachaerus** (twin crimson-silver curved blades, no shield (cross-blade guard requires both arms intact at 1.5× stamina), single-arm resilience until both arms lost), **Executioner** (two-handed blunt hammer with heavy armor bleed-through & guard-breaking heavies), **Retiarius** (long trident + energy-net heavy snare slowing movement & locking dodge, unhelmeted with shoulder pauldron), and **Hoplomachus** (long spear thrust + round buckler (+0.08s parry window) + animated 3-segment crimson cape).
   - Mid-fight breakable armor (`helm`, `pauldron`, `shield`): mitigates limb damage (`0.45×` sharp / `0.75×` blunt), shatters visually on 3D rigs (`Gladiator.tsx`) and launches tumbling wireframe `SeveredPiece` debris + death weapon drops (`ragdoll.ts`).
   - Persisted equipped style in `store.ts` (`boneyard.save.v1`), swap styles in Armory or at the Arena Gate (`HUD.tsx`), and 8 Ludus NPCs + escalating `boutRosterFor` enemy waves showcasing all 5 silhouettes (`Ludus.tsx`, `run.ts`, `Arena.tsx`).
+- [x] **Direction C — PS1 Retro CRT Relic, Low-Poly Polygon Fighters & Colosseum/Temple Overhaul** — COMPLETE (40/40 tests + `tsc` + `vite build` clean):
+  - Procedural Bayer-dithered NearestFilter PS1 textures (`art/ps1Textures.ts`), `Ps1Resolution` 2.4× internal pixel scaling + `Ps1Overlay` CRT scanlines/bezel + `[P]` toggle (`art/Ps1Display.tsx`, `store.ts`).
+  - Faceted twilight PS1 sky dome, moon, distant ruins, and flickering flame `Brazier`s (`art/Ps1Sky.tsx`), plus solid faceted 10-sided stone/bronze Classical Columns (`art/ClassicalColumns.tsx`, UV-preserving `art/StaticBatch.tsx`).
+  - Low-poly tapered polygon fighters (`Gladiator.tsx`) with angular heads, eye slits, kilts, attack telegraph glints, drop shadows, solid faceted style armor/weapons/cape, and matching low-poly `RagdollView`/`SeveredPieceView`.
+  - Colosseum Arena (`Arena.tsx`) with sand pit, center stone medallion, 24-sided stone podium + perimeter shields + N/S portcullis tunnels, open-center 3-tier seating bowl, 16 Roman arches with banners, Emperor's Royal Box, ~120 leaping spectators, and cinematic bout intro sweep.
+  - Temple Sanctuary Ludus (`Ludus.tsx`, `Stations.tsx`) with flagstone plaza, shimmering octagonal fountain basin, paved station walkways, landmark station builds, Live 3D Armory Showcase camera + right-docked PS1 drawer, beveled HUD bars, and keycap legend (`HUD.tsx`, `index.css`).
 - [ ] **Phase C — Excitement Engine** (NEXT: Dazed state + slow-mo `[E]` Executions, Live Crowd Favor & `T` Taunt, Procedural Web Audio drums/steel/crowd).
-- [ ] **Phase D — Restore Citadel Temple Ludus & Colosseum Stands** (Solomon's Temple pavilions/lanterns/sky dome from `8d88a49`, tiered amphitheater with cheering stick spectators & braziers).
-- [ ] **Phase E — Named Rivals, Real Armory, Live Training Yard & Standalone Mac `.app`**.
+- [x] **Standalone Mac App (`BONEYARD.app` & `.dmg`)** — Built via Tauri (`src-tauri/Cargo.toml` `[profile.release.build-override] strip = false`).
+- [ ] **Phase E — Named Rivals & Live Training Yard**.
 
 ## Code map (src/game)
-- `world/` layout + collider math (pure, tested) · `Ludus.tsx`, `Stations.tsx`, `Gladiator.tsx` (articulated stick rig + modular helms/pauldrons/capes/weapons + limp/snare visuals)
+- `world/` layout + collider math (pure, tested) · `Ludus.tsx`, `Stations.tsx`, `Gladiator.tsx` (low-poly PS1 polygon rig + modular armor/cape/weapons + limp/snare/glint visuals)
 - `arena/styles.ts` 5 gladiator styles (`murmillo`, `dimachaerus`, `executioner`, `retiarius`, `hoplomachus`) · `arena/combat.ts` pure combat rules, combos, guard-break, breakable armor, net snare, 6-zone limb damage, AI (tested)
 - `arena/ragdoll.ts` + `physics.ts` Rapier partial ragdoll + `SeveredPiece` limb/armor/weapon debris (tested: 50 kills + 40 mixed pieces stable)
 - `arena/effects.tsx` `ShardPool`, `SlashPool`/`SlashRibbons`, `GhostPool`/`DashGhosts`
 - `arena/boons.ts` + `arena/run.ts` 12 Fate boons, 5-bout ladder (`boutRosterFor`), crest looks
-- `arena/arenaStore.ts` HUD state (`playerLimbs`, enemy `limbs`, `styleName`, locked target, combo, callouts) · `Arena.tsx` scene + sim loop
-- `art/` Citadel art kept: columns, synthwave horizon, starfield, spores, palette · `StaticBatch.tsx`
-- `store.ts` zustand + localStorage save (`boneyard.save.v1`, `style` + `look`)
+- `arena/arenaStore.ts` HUD state (`playerLimbs`, `styleName`, enemy `limbs`, locked target, combo, callouts) · `Arena.tsx` Colosseum scene + sim loop
+- `art/` `ps1Textures.ts` Bayer-dithered textures, `Ps1Display.tsx` low-res CRT buffer & overlay, `Ps1Sky.tsx` sky dome & `Brazier`, `ClassicalColumns.tsx`, `StaticBatch.tsx`, `Starfield.tsx`, `SurrealSpores.tsx`
+- `store.ts` zustand + localStorage save (`boneyard.save.v1`, `style`, `look`, `ps1Mode`)
 
 ## Known issues / honest notes
 - Save is plain localStorage (`boneyard.save.v1`).

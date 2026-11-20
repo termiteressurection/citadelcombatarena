@@ -5,10 +5,11 @@ import { useArena, type LimbHud } from './arena/arenaStore';
 import { boonById } from './arena/boons';
 import { type LimbKey } from './arena/combat';
 import { LADDER, LOOKS } from './arena/run';
-import { STYLE_IDS, STYLES } from './arena/styles';
+import { STYLE_IDS, STYLES, type StyleDef } from './arena/styles';
 
-function Fps() {
+function TopRightControls() {
   const el = useRef<HTMLDivElement>(null);
+  const { ps1Mode, togglePs1Mode } = useGame();
   useEffect(() => {
     let frames = 0, last = performance.now(), raf = 0;
     const loop = (now: number) => {
@@ -22,15 +23,125 @@ function Fps() {
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, []);
-  return <div ref={el} style={{ position: 'absolute', top: 18, right: 22, fontSize: 12, opacity: 0.5 }} />;
+  return (
+    <div style={{ position: 'absolute', top: 14, right: 18, display: 'flex', gap: 10, alignItems: 'center' }}>
+      <button
+        className="clickable btn"
+        style={{ padding: '4px 10px', fontSize: 11, letterSpacing: '.12em', color: ps1Mode ? '#4dffa0' : '#a78bfa', borderColor: ps1Mode ? '#4dffa0' : '#6e5a88' }}
+        onClick={togglePs1Mode}
+        title="Toggle PS1 retro resolution & CRT lines [P]"
+      >
+        PS1 CRT: {ps1Mode ? 'ON' : 'OFF'}
+      </button>
+      <div ref={el} style={{ fontSize: 12, opacity: 0.65, minWidth: 52, textAlign: 'right' }} />
+    </div>
+  );
+}
+
+function MiniStat({ label, pct, color }: { label: string; pct: number; color: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, letterSpacing: '.08em' }}>
+      <span style={{ width: 38, color: '#a99dc4' }}>{label}</span>
+      <div style={{ flex: 1, height: 6, background: '#07050e', border: '1px solid #4d3f66' }}>
+        <div style={{ width: `${Math.max(8, Math.min(100, pct))}%`, height: '100%', background: color }} />
+      </div>
+    </div>
+  );
+}
+
+function styleBars(st: StyleDef) {
+  const armorSum = st.armor.helm + st.armor.pauldron + st.armor.shield;
+  return {
+    dmg: ((st.dmgMul - 0.7) / 0.7) * 100,
+    reach: ((st.reachMul - 0.8) / 0.6) * 100,
+    spd: ((st.speedMul - 0.75) / 0.42) * 100,
+    arm: (armorSum / 88) * 100,
+  };
 }
 
 function StationPanel() {
-  const { panel, setScene, glory, fallen, unlocks, look, style, champions, buyLook, equipLook, equipStyle } = useGame();
+  const { panel, openPanel, setScene, glory, fallen, unlocks, look, style, champions, buyLook, equipLook, equipStyle } = useGame();
   if (!panel) return null;
   const s = STATIONS.find((x) => x.id === panel)!;
   const curStyle = STYLES[style];
   const cycleStyle = () => equipStyle(STYLE_IDS[(STYLE_IDS.indexOf(style) + 1) % STYLE_IDS.length]);
+
+  // Live docked 3D Armory drawer — keeps left viewport open for inspecting the close-up gladiator!
+  if (panel === 'armory') {
+    return (
+      <div className="ps1-box ps1-armory-drawer">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #c99b4355', paddingBottom: 8 }}>
+          <h2 className="ps1-heading" style={{ color: s.color, fontSize: 20, letterSpacing: '.25em' }}>THE ARMORY</h2>
+          <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => openPanel(null)}>CLOSE</button>
+        </div>
+        <div style={{ fontSize: 11, color: '#cfc6e8', letterSpacing: '.06em' }}>
+          Preview live on the left. Pick your Fighting Style & Crest:
+        </div>
+
+        <div style={{ display: 'grid', gap: 7 }}>
+          <div style={{ fontSize: 11, color: '#ffc95c', letterSpacing: '.18em' }}>FIGHTING STYLE</div>
+          {STYLE_IDS.map((id) => {
+            const st = STYLES[id];
+            const eq = style === id;
+            const bars = styleBars(st);
+            return (
+              <button
+                key={id}
+                className="clickable btn"
+                style={{
+                  color: st.color,
+                  borderColor: eq ? st.color : '#4d3f66',
+                  background: eq ? '#1e1633' : '#0b0816',
+                  padding: '8px 10px',
+                  textAlign: 'left',
+                  display: 'grid',
+                  gap: 4,
+                  width: '100%',
+                }}
+                onClick={() => equipStyle(id)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span>{eq ? '▶ ' : ''}{st.name}</span>
+                  {eq && <span style={{ fontSize: 10, color: '#4dffa0' }}>EQUIPPED</span>}
+                </div>
+                <div style={{ fontSize: 10, letterSpacing: '.04em', color: '#e9e6ff', opacity: 0.85 }}>{st.tagline}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 10px', marginTop: 2 }}>
+                  <MiniStat label="DMG" pct={bars.dmg} color={st.color} />
+                  <MiniStat label="REACH" pct={bars.reach} color={st.color} />
+                  <MiniStat label="SPD" pct={bars.spd} color={st.color} />
+                  <MiniStat label="ARMOR" pct={bars.arm} color={st.color} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: '#ffc95c', letterSpacing: '.18em' }}>CREST COLOR</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {LOOKS.filter((l) => unlocks.includes(l.id)).map((l) => (
+              <button
+                key={l.id}
+                className="clickable btn"
+                style={{
+                  color: l.color,
+                  borderColor: look === l.id ? l.color : '#4d3f66',
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  letterSpacing: '.1em',
+                }}
+                onClick={() => equipLook(l.id)}
+              >
+                {look === l.id ? '▶ ' : ''}{l.name}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.55, textAlign: 'center', paddingTop: 4 }}>[ENTER] or [ESC] to return</div>
+      </div>
+    );
+  }
+
   const body: Record<string, JSX.Element> = {
     gate: (
       <>
@@ -42,43 +153,8 @@ function StationPanel() {
         </div>
       </>
     ),
-    armory: (
-      <div style={{ display: 'flex', gap: 28, justifyContent: 'center', alignItems: 'flex-start', flexWrap: 'wrap', maxWidth: 820 }}>
-        <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
-          <p style={{ fontSize: 12, opacity: 0.75 }}>FIGHTING STYLE</p>
-          {STYLE_IDS.map((id) => {
-            const st = STYLES[id];
-            const eq = style === id;
-            return (
-              <button
-                key={id}
-                className="clickable btn"
-                style={{ color: st.color, borderColor: st.color, opacity: eq ? 1 : 0.65, width: 320, padding: '8px 14px', fontSize: 13 }}
-                onClick={() => equipStyle(id)}
-              >
-                <div>{eq ? '▶ ' : ''}{st.name}</div>
-                <div style={{ fontSize: 10, letterSpacing: '.06em', opacity: 0.85, color: '#e9e6ff', marginTop: 2 }}>{st.tagline}</div>
-              </button>
-            );
-          })}
-        </div>
-        <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
-          <p style={{ fontSize: 12, opacity: 0.75 }}>CREST COLOR (COSMETIC)</p>
-          {LOOKS.filter((l) => unlocks.includes(l.id)).map((l) => (
-            <button
-              key={l.id}
-              className="clickable btn"
-              style={{ color: l.color, borderColor: l.color, opacity: look === l.id ? 1 : 0.6, width: 220, padding: '8px 14px', fontSize: 13 }}
-              onClick={() => equipLook(l.id)}
-            >
-              {look === l.id ? '▶ ' : ''}{l.name}
-            </button>
-          ))}
-        </div>
-      </div>
-    ),
     shrine: <>
-      <p>Glory: {glory}</p>
+      <p style={{ color: '#ffc95c', fontSize: 15 }}>GLORY: {glory}</p>
       <p>Offerings unlock new crests. Never raw power.</p>
       <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
         {LOOKS.filter((l) => !unlocks.includes(l.id)).map((l) => (
@@ -87,25 +163,28 @@ function StationPanel() {
         {LOOKS.every((l) => unlocks.includes(l.id)) && <p>Every offering made.</p>}
       </div>
     </>,
-    yard: <p>Dummies are being hauled in. Sparring arrives in a later build.</p>,
+    yard: <p>Wooden dummies stand ready in the sand. Live sparring arrives in a later build.</p>,
     wall: <>
       {champions > 0 && <p style={{ color: '#ffc95c' }}>Championships won: {champions}</p>}
       {fallen.length === 0 ? <p>No one has fallen. Yet.</p> : [...fallen].reverse().slice(0, 8).map((f, i) => <p key={i}>{f.name} — bout {f.bouts}, {f.cause}</p>)}
     </>,
   };
+
   return (
-    <div className="panel" style={{ background: '#06050dcc' }}>
-      <h1 style={{ color: s.color, textShadow: `0 0 20px ${s.color}88` }}>{s.label}</h1>
-      {body[panel]}
-      <p style={{ opacity: 0.5 }}>[ENTER] or [ESC] to close</p>
+    <div className="panel">
+      <div className="ps1-box" style={{ display: 'grid', gap: 14, maxWidth: 620, justifyItems: 'center' }}>
+        <h1 style={{ color: s.color, textShadow: `2px 2px 0 #05030a, 0 0 18px ${s.color}77` }}>{s.label}</h1>
+        {body[panel]}
+        <p style={{ opacity: 0.55, fontSize: 11 }}>[ENTER] or [ESC] to close</p>
+      </div>
     </div>
   );
 }
 
 function Bar({ v, max, color, w = 260 }: { v: number; max: number; color: string; w?: number }) {
   return (
-    <div style={{ width: w, height: 12, border: `1px solid ${color}88`, background: '#06050dcc' }}>
-      <div style={{ width: `${Math.max(0, Math.min(100, (v / max) * 100))}%`, height: '100%', background: color, boxShadow: `0 0 10px ${color}`, transition: 'width .08s' }} />
+    <div className="ps1-bar-track" style={{ width: w }}>
+      <div className="ps1-bar-fill" style={{ width: `${Math.max(0, Math.min(100, (v / max) * 100))}%`, backgroundColor: color, boxShadow: `0 0 8px ${color}88` }} />
     </div>
   );
 }
@@ -130,16 +209,21 @@ function Draft() {
   }, [a]);
   return (
     <div className="panel">
-      <h1>FATE</h1>
-      <p>Bout {a.bout} won. +{a.earned} glory. Take one. The others are gone.</p>
-      <div style={{ display: 'flex', gap: 18, justifyContent: 'center' }}>
-        {a.draft.map((id, i) => { const b = boonById(id)!; return (
-          <button key={id} className="clickable btn" style={{ color: b.color, borderColor: b.color, width: 220, padding: '22px 12px', display: 'grid', gap: 10 }} onClick={() => a.pick(id)}>
-            <span style={{ fontSize: 12, opacity: 0.6 }}>[{i + 1}]</span>
-            <span>{b.name}</span>
-            <span style={{ fontSize: 12, letterSpacing: '.08em', color: '#e9e6ff' }}>{b.desc}</span>
-          </button>
-        ); })}
+      <div className="ps1-box" style={{ display: 'grid', gap: 14, justifyItems: 'center' }}>
+        <h1>FATE</h1>
+        <p>Bout {a.bout} won. +{a.earned} glory. Take one. The others are gone.</p>
+        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {a.draft.map((id, i) => {
+            const b = boonById(id)!;
+            return (
+              <button key={id} className="clickable btn" style={{ color: b.color, borderColor: b.color, width: 210, padding: '18px 12px', display: 'grid', gap: 8 }} onClick={() => a.pick(id)}>
+                <span style={{ fontSize: 11, opacity: 0.7 }}>[{i + 1}]</span>
+                <span>{b.name}</span>
+                <span style={{ fontSize: 11, letterSpacing: '.06em', color: '#e9e6ff' }}>{b.desc}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -159,8 +243,8 @@ function CalloutFlash() {
     <div
       style={{
         position: 'absolute', top: '24%', left: '50%', transform: 'translateX(-50%)',
-        fontSize: 24, letterSpacing: '.28em', color: callout.color, fontWeight: 700,
-        textShadow: `0 0 22px ${callout.color}`, fontFamily: 'Menlo, "SF Mono", monospace',
+        fontSize: 24, letterSpacing: '.26em', color: callout.color, fontWeight: 700,
+        textShadow: `2px 2px 0 #05030a, 0 0 18px ${callout.color}`, fontFamily: 'Menlo, "SF Mono", monospace',
         whiteSpace: 'nowrap',
       }}
     >
@@ -185,7 +269,7 @@ function LimbDoll({ limbs, size = 56 }: { limbs: LimbHud; size?: number }) {
       width={Math.round((size * 44) / 64)}
       height={size}
       viewBox="0 0 44 64"
-      style={{ background: '#06050dbb', border: '1px solid #e9e6ff28', padding: 2, flexShrink: 0 }}
+      style={{ background: '#07050ee6', border: '2px solid #c99b4388', padding: 2, flexShrink: 0, boxShadow: '2px 2px 0 #040208' }}
     >
       {DOLL_SEGMENTS.map((seg) => {
         const l = limbs[seg.key];
@@ -209,62 +293,97 @@ function LimbDoll({ limbs, size = 56 }: { limbs: LimbHud; size?: number }) {
   );
 }
 
+function KeyCap({ k, label }: { k: string; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span className="ps1-key">{k}</span>
+      <span style={{ opacity: 0.78 }}>{label}</span>
+    </span>
+  );
+}
+
 function ArenaHud() {
-  const { scene, setScene } = useGame();
+  const { scene, setScene, style } = useGame();
   const a = useArena();
   if (scene !== 'arena') return null;
+  const stDef = STYLES[style];
   const leave = () => { a.set({ phase: 'intro', hp: 100, st: 100, enemies: [], callout: null, combo: 0 }); setScene('ludus'); };
   return (
     <>
-      <div style={{ position: 'absolute', top: 54, left: 22, display: 'grid', gap: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ position: 'absolute', top: 52, left: 20, display: 'grid', gap: 6 }}>
+        <div className="ps1-box" style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <LimbDoll limbs={a.playerLimbs} size={58} />
-          <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'grid', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 11, letterSpacing: '.14em' }}>
+              <span style={{ color: stDef.color }}>{stDef.name}</span>
+              <span style={{ color: '#ffc95c' }}>BOUT {a.bout}/{LADDER.length}</span>
+            </div>
             <Bar v={a.hp} max={a.maxHp} color="#ff4f6d" w={190} />
-            <Bar v={a.st} max={a.maxSt} color="#4dffa0" w={150} />
-            <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: '.15em' }}>BOUT {a.bout} / {LADDER.length}</div>
+            <Bar v={a.st} max={a.maxSt} color="#4dffa0" w={155} />
           </div>
         </div>
         <div
           style={{
             display: 'inline-block', justifySelf: 'start', fontSize: 11, letterSpacing: '.14em',
             padding: '3px 8px',
-            border: `1px solid ${a.lockedName ? '#3ff0ff88' : '#e9e6ff44'}`,
-            color: a.lockedName ? '#3ff0ff' : '#e9e6ff88',
-            background: '#06050daa',
+            border: `1px solid ${a.lockedName ? '#3ff0ff88' : '#c99b4366'}`,
+            color: a.lockedName ? '#3ff0ff' : '#cfc6e8aa',
+            background: '#0d0919cc',
           }}
         >
           {a.lockedName ? `LOCKED · ${a.lockedName} [TAB]` : 'FREE CAM · Q/E ORBIT [TAB]'}
         </div>
         {a.combo >= 2 && (
-          <div style={{ fontSize: 18, letterSpacing: '.25em', color: '#ffc95c', textShadow: '0 0 14px #ffc95caa' }}>
+          <div style={{ fontSize: 18, letterSpacing: '.25em', color: '#ffc95c', textShadow: '2px 2px 0 #05030a, 0 0 12px #ffc95caa' }}>
             {a.combo} HIT
           </div>
         )}
         <BoonList ids={a.boons} />
       </div>
-      <div style={{ position: 'absolute', top: 54, left: '50%', transform: 'translateX(-50%)', display: 'grid', gap: 8, justifyItems: 'center' }}>
+
+      <div style={{ position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)', display: 'grid', gap: 8, justifyItems: 'center' }}>
         {a.enemies.filter((e) => e.hp > 0).map((e) => (
-          <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div key={e.id} className="ps1-box" style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
-              <div style={{ letterSpacing: '.26em', fontSize: 13, color: '#ff6b6b' }}>{e.name} · {e.styleName}</div>
+              <div style={{ letterSpacing: '.22em', fontSize: 12, color: '#ff6b6b' }}>{e.name} · {e.styleName}</div>
               <Bar v={e.hp} max={e.max} color="#ff6b6b" w={210} />
             </div>
             <LimbDoll limbs={e.limbs} size={44} />
           </div>
         ))}
       </div>
+
       <CalloutFlash />
-      {a.phase === 'intro' && <div className="panel" style={{ background: 'transparent' }}><h1>BOUT {a.bout}</h1></div>}
+      {a.phase === 'intro' && (
+        <div className="panel" style={{ background: 'transparent' }}>
+          <div className="ps1-box" style={{ padding: '16px 36px' }}>
+            <h1>BOUT {a.bout}</h1>
+            <p style={{ marginTop: 6, color: '#e9e6ff' }}>ENTER THE SAND</p>
+          </div>
+        </div>
+      )}
       {a.phase === 'draft' && <Draft />}
       {(a.phase === 'defeat' || a.phase === 'champion') && (
         <div className="panel">
-          <h1 style={a.phase === 'defeat' ? { color: '#ff4f6d', textShadow: '0 0 20px #ff4f6d88' } : undefined}>{a.phase === 'champion' ? 'CHAMPION OF THE SAND' : 'YOU FELL'}</h1>
-          <p>{a.phase === 'champion' ? `+${a.earned} GLORY. Your name is sung in the stands.` : `Bout ${a.bout} of ${LADDER.length}. Your name is carved on the Wall of the Fallen.`}</p>
-          <button className="clickable btn" onClick={leave}>RETURN TO THE LUDUS</button>
+          <div className="ps1-box" style={{ display: 'grid', gap: 14, justifyItems: 'center' }}>
+            <h1 style={a.phase === 'defeat' ? { color: '#ff4f6d', textShadow: '2px 2px 0 #05030a, 0 0 20px #ff4f6d88' } : undefined}>
+              {a.phase === 'champion' ? 'CHAMPION OF THE SAND' : 'YOU FELL'}
+            </h1>
+            <p>{a.phase === 'champion' ? `+${a.earned} GLORY. Your name is sung in the stands.` : `Bout ${a.bout} of ${LADDER.length}. Your name is carved on the Wall of the Fallen.`}</p>
+            <button className="clickable btn" onClick={leave}>RETURN TO THE LUDUS</button>
+          </div>
         </div>
       )}
-      <div className="controls">WASD move · J / click 3-hit combo · K / r-click heavy · F guard-break · SHIFT block/parry · SPACE dodge · TAB lock-on</div>
+      <div className="controls">
+        <KeyCap k="WASD" label="Move" />
+        <KeyCap k="LMB/J" label="Combo" />
+        <KeyCap k="RMB/K" label="Heavy" />
+        <KeyCap k="F" label="Bash" />
+        <KeyCap k="SHIFT" label="Guard" />
+        <KeyCap k="SPACE" label="Dodge" />
+        <KeyCap k="TAB" label="Lock" />
+        <KeyCap k="P" label="CRT" />
+      </div>
     </>
   );
 }
@@ -277,9 +396,17 @@ export function HUD() {
   return (
     <div className="hud">
       <div className="title">BONEYARD · {scene === 'ludus' ? 'THE LUDUS' : 'THE ARENA'}</div>
-      <Fps />
+      <TopRightControls />
       {station && !panel && <div className="hint" style={{ borderColor: station.color, color: station.color }}>[ENTER] {station.verb}</div>}
-      {scene === 'ludus' && <div className="controls">WASD / arrows move · Q E rotate camera · R F tilt · ENTER interact</div>}
+      {scene === 'ludus' && (
+        <div className="controls">
+          <KeyCap k="WASD" label="Move" />
+          <KeyCap k="Q/E" label="Orbit" />
+          <KeyCap k="R/F" label="Tilt" />
+          <KeyCap k="ENTER" label="Use" />
+          <KeyCap k="P" label="CRT" />
+        </div>
+      )}
       <StationPanel />
       <ArenaHud />
     </div>

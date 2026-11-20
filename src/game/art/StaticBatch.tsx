@@ -30,8 +30,8 @@ export function StaticBatch({ children }: { children: ReactNode }) {
     src.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh || Array.isArray(m.material)) return;
-      const mat = m.material as THREE.MeshBasicMaterial;
-      const key = `${mat.type}|${mat.color?.getHexString()}|${mat.wireframe}|${mat.transparent}|${mat.opacity}|${mat.side}|${mat.blending}`;
+      const mat = m.material as THREE.MeshBasicMaterial & { flatShading?: boolean; map?: THREE.Texture | null };
+      const key = `${mat.type}|${mat.color?.getHexString()}|${Boolean(mat.wireframe)}|${Boolean(mat.transparent)}|${mat.opacity}|${mat.side}|${mat.blending}|${Boolean(mat.flatShading)}|${mat.map?.uuid ?? ''}`;
       const g = m.geometry.clone();
       g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
       let b = buckets.get(key);
@@ -40,7 +40,13 @@ export function StaticBatch({ children }: { children: ReactNode }) {
     });
     const merged: THREE.Mesh[] = [];
     for (const { material, geos } of buckets.values()) {
-      const norm = geos.map((g) => { g.deleteAttribute('uv'); if (!g.index) return g.toNonIndexed(); return g.toNonIndexed(); });
+      const allHaveUv = geos.every((g) => Boolean(g.getAttribute('uv')));
+      const norm = geos.map((g) => {
+        const ng = g.index ? g.toNonIndexed() : g;
+        if (!allHaveUv && ng.getAttribute('uv')) ng.deleteAttribute('uv');
+        if (!ng.getAttribute('normal')) ng.computeVertexNormals();
+        return ng;
+      });
       const geo = mergeGeometries(norm, false);
       if (!geo) { merged.forEach((m) => m.geometry.dispose()); return; }
       const mesh = new THREE.Mesh(geo, material);

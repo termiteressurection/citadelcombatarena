@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Gladiator, type GladiatorHandle, type LimbPose } from './Gladiator';
-import { SynthwaveHorizon } from './art/SynthwaveHorizon';
+import { Brazier, Ps1Sky } from './art/Ps1Sky';
+import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import Starfield from './art/Starfield';
-import { DoricColumn } from './art/ClassicalColumns';
 import {
   ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, defaultMods, makeFighter, resolveStrike, stepFighter,
   type Fighter, type HitEvent, type Intent, type LimbKey,
@@ -426,16 +426,22 @@ function TargetReticle({ w }: { w: ArenaWorld }) {
 }
 
 const STICK_DIMS: Record<string, [number, number, number]> = {
-  pelvis: [0.1, 0.16, 0.1], torso: [0.1, 0.56, 0.1], head: [0.075, 0.2, 0.075],
-  thighL: [0.11, 0.4, 0.11], thighR: [0.11, 0.4, 0.11], shinL: [0.1, 0.4, 0.1], shinR: [0.1, 0.4, 0.1],
-  uarmL: [0.075, 0.28, 0.075], uarmR: [0.075, 0.28, 0.075], farmL: [0.075, 0.26, 0.075], farmR: [0.075, 0.26, 0.075],
+  pelvis: [0.16, 0.14, 5], torso: [0.21, 0.50, 6], head: [0.10, 0.22, 6],
+  thighL: [0.085, 0.42, 5], thighR: [0.085, 0.42, 5], shinL: [0.068, 0.40, 5], shinR: [0.068, 0.40, 5],
+  uarmL: [0.072, 0.32, 5], uarmR: [0.072, 0.32, 5], farmL: [0.058, 0.28, 5], farmR: [0.058, 0.28, 5],
 };
 const PART_MAP = new Map(PARTS.map((p) => [p.name, p]));
 
-/** The dead keep their stick rig: surviving dashes flung about by physics. */
+/** The dead keep their low-poly PS1 polygon silhouette, flung about by physics. */
 function RagdollView({ w, rag }: { w: ArenaWorld; rag: Ragdoll }) {
   const refs = useRef<(THREE.Group | null)[]>([]);
-  const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(rag.color).lerp(new THREE.Color('#ffffff'), 0.72) }), [rag.color]);
+  const mat = useMemo(
+    () => makePs1Material({
+      color: new THREE.Color(rag.color).lerp(new THREE.Color('#e6dff2'), 0.65),
+      map: getPs1Texture('tunic'),
+    }),
+    [rag.color],
+  );
   useFrame(() => {
     if (w.freed || rag.shattered || rag.bodies.length === 0) return;
     rag.bodies.forEach((b, i) => {
@@ -449,9 +455,10 @@ function RagdollView({ w, rag }: { w: ArenaWorld; rag: Ragdoll }) {
     <group>
       {rag.partNames.map((name, i) => {
         const d = PART_MAP.get(name)!;
+        const [r, h, seg] = STICK_DIMS[name];
         return (
           <group key={name} ref={(el) => { refs.current[i] = el; }} position={d.pos}>
-            <mesh material={mat}><boxGeometry args={STICK_DIMS[name]} /></mesh>
+            <mesh material={mat}><cylinderGeometry args={[r, r * 0.8, h, seg]} /></mesh>
           </group>
         );
       })}
@@ -459,13 +466,17 @@ function RagdollView({ w, rag }: { w: ArenaWorld; rag: Ragdoll }) {
   );
 }
 
-/** Tumbling severed limb, shattered armor piece, or dropped weapon on the arena sand. */
+/** Tumbling low-poly PS1 severed limb, shattered armor piece, or dropped weapon on the sand. */
 function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) {
   const limbRef = useRef<THREE.Group>(null!);
   const weaponRef = useRef<THREE.Group>(null!);
-  const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(piece.color).lerp(new THREE.Color('#ffffff'), 0.72) }), [piece.color]);
-  const wireMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ffc95c', wireframe: true, side: THREE.DoubleSide }), []);
-  const shieldMat = useMemo(() => new THREE.MeshBasicMaterial({ color: piece.color, wireframe: true, side: THREE.DoubleSide }), [piece.color]);
+  const mats = useMemo(() => ({
+    limb: makePs1Material({ color: new THREE.Color(piece.color).lerp(new THREE.Color('#e6dff2'), 0.65), map: getPs1Texture('tunic') }),
+    bronze: makePs1Material({ color: '#ffd57e', map: getPs1Texture('bronze') }),
+    wood: makePs1Material({ color: '#a8784e', map: getPs1Texture('wood') }),
+    shield: makePs1Material({ color: piece.color, map: getPs1Texture('bronze') }),
+    blade: makePs1Material({ color: '#e8eeff', map: getPs1Texture('bronze'), emissive: piece.color, emissiveIntensity: 0.2 }),
+  }), [piece.color]);
 
   useFrame(() => {
     if (w.freed || piece.shattered) return;
@@ -485,28 +496,28 @@ function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) 
     if (piece.style === 'executioner') {
       return (
         <group>
-          <mesh material={wireMat}><boxGeometry args={[0.055, 1.2, 0.055]} /></mesh>
-          <mesh position={[0, -0.58, 0]} material={wireMat}><boxGeometry args={[0.26, 0.22, 0.42]} /></mesh>
+          <mesh material={mats.wood}><cylinderGeometry args={[0.04, 0.04, 1.2, 5]} /></mesh>
+          <mesh position={[0, -0.58, 0]} material={mats.bronze}><boxGeometry args={[0.26, 0.22, 0.42]} /></mesh>
         </group>
       );
     }
     if (piece.style === 'retiarius') {
       return (
         <group>
-          <mesh material={wireMat}><boxGeometry args={[0.045, 1.4, 0.045]} /></mesh>
-          <mesh position={[0, -0.7, 0]} material={wireMat}><boxGeometry args={[0.3, 0.05, 0.05]} /></mesh>
+          <mesh material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.4, 5]} /></mesh>
+          <mesh position={[0, -0.7, 0]} material={mats.bronze}><boxGeometry args={[0.3, 0.05, 0.05]} /></mesh>
         </group>
       );
     }
     if (piece.style === 'hoplomachus') {
       return (
         <group>
-          <mesh material={wireMat}><boxGeometry args={[0.045, 1.5, 0.045]} /></mesh>
-          <mesh position={[0, -0.78, 0]} rotation={[Math.PI, 0, 0]}><coneGeometry args={[0.08, 0.25, 4]} /><meshBasicMaterial color="#ffffff" /></mesh>
+          <mesh material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.5, 5]} /></mesh>
+          <mesh position={[0, -0.78, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.08, 0.25, 4]} /></mesh>
         </group>
       );
     }
-    return <mesh><boxGeometry args={[0.055, 0.85, 0.055]} /><meshBasicMaterial color="#ffffff" /></mesh>;
+    return <mesh material={mats.blade}><boxGeometry args={[0.06, 0.85, 0.07]} /></mesh>;
   };
 
   return (
@@ -514,22 +525,22 @@ function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) 
       <group ref={limbRef}>
         {piece.kind === 'helm' && (
           <group>
-            <mesh material={wireMat}><boxGeometry args={[0.22, 0.24, 0.24]} /></mesh>
-            <mesh position={[0, 0.16, 0]} material={wireMat}><boxGeometry args={[0.05, 0.16, 0.3]} /></mesh>
+            <mesh material={mats.bronze}><cylinderGeometry args={[0.13, 0.145, 0.24, 6]} /></mesh>
+            <mesh position={[0, 0.17, 0]} material={mats.shield}><boxGeometry args={[0.055, 0.16, 0.32]} /></mesh>
           </group>
         )}
         {piece.kind === 'pauldron' && (
           <group>
-            <mesh material={wireMat}><icosahedronGeometry args={[0.17, 0]} /></mesh>
-            <mesh position={[0, 0.18, 0]} material={wireMat}><coneGeometry args={[0.06, 0.22, 4]} /></mesh>
+            <mesh material={mats.bronze}><icosahedronGeometry args={[0.17, 0]} /></mesh>
+            <mesh position={[0, 0.18, 0]} material={mats.shield}><coneGeometry args={[0.06, 0.22, 4]} /></mesh>
           </group>
         )}
         {piece.kind === 'shield' && (
-          <mesh rotation={[Math.PI / 2, 0, 0]} material={shieldMat}><ringGeometry args={[0.22, 0.34, 8]} /></mesh>
+          <mesh rotation={[Math.PI / 2, 0, 0]} material={mats.shield}><cylinderGeometry args={[0.32, 0.32, 0.06, 8]} /></mesh>
         )}
         {piece.kind === 'weapon' && renderWeapon()}
         {piece.kind !== 'helm' && piece.kind !== 'pauldron' && piece.kind !== 'shield' && piece.kind !== 'weapon' && (
-          <mesh material={mat}><boxGeometry args={piece.kind === 'head' ? [0.08, 0.2, 0.08] : [0.09, 0.38, 0.09]} /></mesh>
+          <mesh material={mats.limb}><cylinderGeometry args={piece.kind === 'head' ? [0.1, 0.085, 0.22, 6] : [0.075, 0.06, 0.38, 5]} /></mesh>
         )}
       </group>
       {piece.weaponBody && piece.kind === 'armR' && (
@@ -538,8 +549,8 @@ function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) 
       {piece.weaponBody && piece.kind === 'armL' && (
         <group ref={weaponRef}>
           {styleOf(piece.style).dualWield
-            ? <mesh><boxGeometry args={[0.05, 0.78, 0.05]} /><meshBasicMaterial color="#ffffff" /></mesh>
-            : <mesh rotation={[Math.PI / 2, 0, 0]} material={shieldMat}><ringGeometry args={[0.2, 0.27, 10]} /></mesh>}
+            ? <mesh material={mats.blade}><boxGeometry args={[0.055, 0.78, 0.065]} /></mesh>
+            : <mesh rotation={[Math.PI / 2, 0, 0]} material={mats.shield}><cylinderGeometry args={[0.26, 0.26, 0.06, 8]} /></mesh>}
         </group>
       )}
     </group>
@@ -547,28 +558,249 @@ function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) 
 }
 
 function Ring() {
-  const rings = [4, 8, 12, 16];
+  const mats = useMemo(() => {
+    const sandTex = cloneTex(getPs1Texture('sand'), 9, 9);
+    const stoneWallTex = cloneTex(getPs1Texture('stone'), 16, 1.5);
+    const stoneCapTex = cloneTex(getPs1Texture('stone'), 2, 2);
+    const bronzeTex = getPs1Texture('bronze');
+    return {
+      sand: makePs1Material({ color: '#e6caa0', map: sandTex }),
+      stoneWall: makePs1Material({ color: '#cac0d8', map: stoneWallTex, side: THREE.DoubleSide }),
+      stoneCap: makePs1Material({ color: '#cfc5df', map: stoneCapTex }),
+      bronze: makePs1Material({ color: '#ffd480', map: bronzeTex }),
+      iron: new THREE.MeshBasicMaterial({ color: '#07050c' }),
+      markGold: new THREE.MeshBasicMaterial({ color: '#e8b654', transparent: true, opacity: 0.45 }),
+      markCrimson: new THREE.MeshBasicMaterial({ color: '#ff385c', transparent: true, opacity: 0.42 }),
+    };
+  }, []);
+
+  const wallShields = useMemo(() => {
+    const out: { x: number; z: number; ry: number }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + Math.PI / 12;
+      if (Math.abs(Math.sin(a)) > 0.92) continue; // skip N/S gate tunnels
+      const r = ARENA_RADIUS + 0.48;
+      out.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, ry: -a + Math.PI / 2 });
+    }
+    return out;
+  }, []);
+
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}><circleGeometry args={[ARENA_RADIUS, 64]} /><meshBasicMaterial color="#0b0620" /></mesh>
-      {rings.map((r) => (
-        <mesh key={r} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}><ringGeometry args={[r - 0.04, r + 0.04, 64]} /><meshBasicMaterial color={r === 16 ? '#ff4fd8' : '#3ff0ff'} transparent opacity={r === 16 ? 0.8 : 0.35} /></mesh>
+      {/* Textured PS1 Colosseum sand pit floor */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} material={mats.sand}>
+        <circleGeometry args={[ARENA_RADIUS + 0.5, 24]} />
+      </mesh>
+      {/* Central octagonal stone medallion & battle ring lines */}
+      <mesh position={[0, 0.02, 0]} material={mats.stoneCap}>
+        <cylinderGeometry args={[2.2, 2.5, 0.06, 8]} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]} material={mats.markGold}>
+        <ringGeometry args={[2.55, 2.75, 8]} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} material={mats.markGold}>
+        <ringGeometry args={[8.5, 8.68, 24]} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} material={mats.markCrimson}>
+        <ringGeometry args={[15.8, 16.05, 24]} />
+      </mesh>
+
+      {/* Chunky weathered stone arena podium wall (24-sided) + upper bronze coping */}
+      <mesh position={[0, 1.3, 0]} material={mats.stoneWall}>
+        <cylinderGeometry args={[ARENA_RADIUS + 0.65, ARENA_RADIUS + 0.65, 2.6, 24, 1, true]} />
+      </mesh>
+      <mesh position={[0, 2.7, 0]} rotation={[Math.PI / 2, 0, 0]} material={mats.bronze}>
+        <torusGeometry args={[ARENA_RADIUS + 0.72, 0.24, 6, 24]} />
+      </mesh>
+
+      {/* Decorative bronze shields ringing the podium wall */}
+      {wallShields.map((s, i) => (
+        <group key={i} position={[s.x, 1.45, s.z]} rotation={[0, s.ry, 0]}>
+          <mesh rotation={[Math.PI / 2, 0, 0]} material={mats.bronze}>
+            <cylinderGeometry args={[0.62, 0.62, 0.14, 8]} />
+          </mesh>
+        </group>
       ))}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}><circleGeometry args={[1.2, 6]} /><meshBasicMaterial color="#ffc95c" wireframe /></mesh>
-      {/* the wall that physics and fighters actually collide with */}
-      <mesh position={[0, 1.2, 0]}><cylinderGeometry args={[ARENA_RADIUS + 0.55, ARENA_RADIUS + 0.55, 2.4, 48, 1, true]} /><meshBasicMaterial color="#0b051b" side={THREE.DoubleSide} /></mesh>
-      <mesh position={[0, 1.2, 0]}><cylinderGeometry args={[ARENA_RADIUS + 0.6, ARENA_RADIUS + 0.6, 2.4, 48, 6, true]} /><meshBasicMaterial color="#ffc95c" wireframe transparent opacity={0.45} /></mesh>
+
+      {/* North & South Gladiator Entry Tunnels with portcullis grate */}
+      {([-1, 1] as const).map((dir) => (
+        <group key={dir} position={[0, 0, dir * (ARENA_RADIUS + 0.7)]}>
+          <mesh position={[-1.9, 1.9, 0]} material={mats.stoneCap}><boxGeometry args={[0.9, 3.8, 1.8]} /></mesh>
+          <mesh position={[1.9, 1.9, 0]} material={mats.stoneCap}><boxGeometry args={[0.9, 3.8, 1.8]} /></mesh>
+          <mesh position={[0, 3.6, 0]} material={mats.bronze}><boxGeometry args={[5.0, 0.75, 2.0]} /></mesh>
+          <mesh position={[0, 1.65, dir * 0.25]} material={mats.iron}><boxGeometry args={[2.9, 3.2, 0.8]} /></mesh>
+          {[-0.9, -0.3, 0.3, 0.9].map((x) => (
+            <mesh key={x} position={[x, 1.65, -dir * 0.2]} material={mats.bronze}><boxGeometry args={[0.09, 3.2, 0.09]} /></mesh>
+          ))}
+        </group>
+      ))}
     </group>
   );
 }
 
-function Stands() {
-  const ref = useRef(new THREE.Vector3());
-  const cols = useMemo(() => Array.from({ length: 16 }, (_, i) => {
-    const a = (i / 16) * Math.PI * 2, r = ARENA_RADIUS + 5;
-    return [Math.cos(a) * r, 0, Math.sin(a) * r] as [number, number, number];
+const CROWD_COLORS = ['#c99b43', '#b8324c', '#5b4ca8', '#cfc8e0', '#8f5f3a'];
+
+function Stands({ w }: { w: ArenaWorld }) {
+  const mats = useMemo(() => {
+    const stoneTierTex = cloneTex(getPs1Texture('stone'), 20, 3);
+    const stonePierTex = cloneTex(getPs1Texture('stone'), 2, 4);
+    const bannerTex = getPs1Texture('banner');
+    const bronzeTex = getPs1Texture('bronze');
+    return {
+      tier: makePs1Material({ color: '#b4aac4', map: stoneTierTex, side: THREE.DoubleSide }),
+      pier: makePs1Material({ color: '#c8bfd8', map: stonePierTex }),
+      darkBay: new THREE.MeshBasicMaterial({ color: '#090612' }),
+      bronze: makePs1Material({ color: '#ffd37c', map: bronzeTex }),
+      banner: makePs1Material({ color: '#ffffff', map: bannerTex, side: THREE.DoubleSide }),
+      crowdBody: makePs1Material({ color: '#ffffff', map: getPs1Texture('tunic') }),
+      crowdHead: new THREE.MeshLambertMaterial({ color: '#e6d8f0', flatShading: true }),
+    };
+  }, []);
+
+  const arches = useMemo(() => {
+    const out: { x: number; z: number; ry: number }[] = [];
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const r = 32.5;
+      out.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, ry: -a + Math.PI / 2 });
+    }
+    return out;
+  }, []);
+
+  const braziers = useMemo(() => Array.from({ length: 8 }, (_, i) => {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const r = ARENA_RADIUS + 1.4;
+    return [Math.cos(a) * r, 2.75, Math.sin(a) * r] as [number, number, number];
   }), []);
-  return <group>{cols.map((p, i) => <DoricColumn key={i} position={p} scale={1.15} playerPos={ref} />)}</group>;
+
+  const crowdSpecs = useMemo(() => {
+    const list: { x: number; y: number; z: number; ry: number; phase: number; color: THREE.Color }[] = [];
+    const tiers = [
+      { r: 21.8, y: 3.15, n: 32 },
+      { r: 25.4, y: 4.95, n: 40 },
+      { r: 29.0, y: 6.75, n: 48 },
+    ];
+    let idx = 0;
+    for (const tier of tiers) {
+      for (let i = 0; i < tier.n; i++) {
+        const a = (i / tier.n) * Math.PI * 2 + (tier.y * 0.17);
+        // Leave gap behind Emperor's Royal Box (North, sin(a) < -0.92)
+        if (Math.sin(a) < -0.9 && tier.r < 27) continue;
+        list.push({
+          x: Math.cos(a) * tier.r,
+          y: tier.y,
+          z: Math.sin(a) * tier.r,
+          ry: -a - Math.PI / 2,
+          phase: idx * 0.73,
+          color: new THREE.Color(CROWD_COLORS[idx % CROWD_COLORS.length]),
+        });
+        idx++;
+      }
+    }
+    return list;
+  }, []);
+
+  const torsoMesh = useRef<THREE.InstancedMesh>(null!);
+  const headMesh = useRef<THREE.InstancedMesh>(null!);
+  const scratch = useMemo(() => ({ obj: new THREE.Object3D() }), []);
+  const painted = useRef(false);
+
+  useFrame(({ clock }) => {
+    const tm = torsoMesh.current;
+    const hm = headMesh.current;
+    if (!tm || !hm) return;
+    if (!painted.current) {
+      painted.current = true;
+      crowdSpecs.forEach((c, i) => {
+        tm.setColorAt(i, c.color);
+        hm.setColorAt(i, c.color);
+      });
+      if (tm.instanceColor) tm.instanceColor.needsUpdate = true;
+      if (hm.instanceColor) hm.instanceColor.needsUpdate = true;
+    }
+    const hyped = w.shake > 0.05 || (w.fighters[0]?.comboStep ?? 0) >= 2 || w.phase === 'victory';
+    const t = clock.elapsedTime;
+    const o = scratch.obj;
+    for (let i = 0; i < crowdSpecs.length; i++) {
+      const c = crowdSpecs[i];
+      const freq = hyped ? 11 : 2.6;
+      const amp = hyped ? 0.36 : 0.07;
+      const jump = Math.max(0, Math.sin(t * freq + c.phase)) * amp;
+      o.position.set(c.x, c.y + 0.48 + jump, c.z);
+      o.rotation.set(0, c.ry, hyped ? Math.sin(t * 14 + c.phase) * 0.14 : 0);
+      o.scale.set(1, 1, 1);
+      o.updateMatrix();
+      tm.setMatrixAt(i, o.matrix);
+
+      o.position.set(c.x, c.y + 1.05 + jump, c.z);
+      o.rotation.set(0, c.ry, 0);
+      o.updateMatrix();
+      hm.setMatrixAt(i, o.matrix);
+    }
+    tm.instanceMatrix.needsUpdate = true;
+    hm.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <group>
+      {/* 3 Tiered Colosseum Seating Risers & Horizontal Decks (open-center bowl) */}
+      <mesh position={[0, 2.75, 0]} material={mats.tier}>
+        <cylinderGeometry args={[19.6, 19.6, 0.9, 24, 1, true]} />
+      </mesh>
+      <mesh position={[0, 3.15, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.tier}>
+        <ringGeometry args={[19.5, 23.8, 24]} />
+      </mesh>
+      <mesh position={[0, 4.05, 0]} material={mats.tier}>
+        <cylinderGeometry args={[23.6, 23.6, 1.85, 24, 1, true]} />
+      </mesh>
+      <mesh position={[0, 4.95, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.tier}>
+        <ringGeometry args={[23.5, 27.4, 24]} />
+      </mesh>
+      <mesh position={[0, 5.85, 0]} material={mats.tier}>
+        <cylinderGeometry args={[27.2, 27.2, 1.85, 24, 1, true]} />
+      </mesh>
+      <mesh position={[0, 6.75, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.tier}>
+        <ringGeometry args={[27.1, 32.8, 24]} />
+      </mesh>
+
+      {/* Outer ring of 16 Monumental Roman Arches + Hanging Banners */}
+      {arches.map((ar, i) => (
+        <group key={i} position={[ar.x, 0, ar.z]} rotation={[0, ar.ry, 0]}>
+          <mesh position={[-5.2, 7.6, 0]} material={mats.pier}><boxGeometry args={[2.2, 8.2, 2.6]} /></mesh>
+          <mesh position={[0, 11.4, 0]} material={mats.pier}><boxGeometry args={[12.8, 1.8, 2.8]} /></mesh>
+          <mesh position={[0, 12.6, 0]} material={mats.bronze}><boxGeometry args={[13.2, 0.65, 3.1]} /></mesh>
+          <mesh position={[0, 7.2, 1.6]} material={mats.darkBay}><boxGeometry args={[11.2, 9.5, 0.5]} /></mesh>
+          <mesh position={[0, 9.2, -1.55]} material={mats.banner}><boxGeometry args={[1.4, 3.0, 0.08]} /></mesh>
+        </group>
+      ))}
+
+      {/* Emperor's Royal Box overlooking North Wall */}
+      <group position={[0, 3.0, -21.2]}>
+        <mesh position={[0, 0.7, 0]} material={mats.pier}><boxGeometry args={[8.4, 1.4, 4.2]} /></mesh>
+        <mesh position={[0, 1.5, 2.15]} material={mats.bronze}><boxGeometry args={[8.6, 0.4, 0.35]} /></mesh>
+        {([-3.6, -1.3, 1.3, 3.6] as const).map((x) => (
+          <mesh key={x} position={[x, 3.3, 1.6]} material={mats.bronze}><cylinderGeometry args={[0.24, 0.28, 3.6, 6]} /></mesh>
+        ))}
+        <mesh position={[0, 5.25, 0.4]} material={mats.bronze}><boxGeometry args={[9.0, 0.65, 4.6]} /></mesh>
+        <mesh position={[0, 6.2, 0.4]} rotation={[0, Math.PI / 4, 0]} material={mats.banner}><coneGeometry args={[5.4, 1.6, 4]} /></mesh>
+        <mesh position={[-2.4, 3.3, 1.9]} material={mats.banner}><boxGeometry args={[1.2, 2.8, 0.08]} /></mesh>
+        <mesh position={[2.4, 3.3, 1.9]} material={mats.banner}><boxGeometry args={[1.2, 2.8, 0.08]} /></mesh>
+      </group>
+
+      {/* 8 Podium Braziers (2 cast warm firelight on the sand) */}
+      {braziers.map((pos, i) => (
+        <Brazier key={i} position={pos} scale={0.95} light={i === 0 || i === 4} />
+      ))}
+
+      {/* Instanced Low-Poly Cheering Spectators */}
+      <instancedMesh ref={torsoMesh} args={[undefined, undefined, crowdSpecs.length]} material={mats.crowdBody} frustumCulled={false}>
+        <cylinderGeometry args={[0.24, 0.3, 0.76, 5]} />
+      </instancedMesh>
+      <instancedMesh ref={headMesh} args={[undefined, undefined, crowdSpecs.length]} material={mats.crowdHead} frustumCulled={false}>
+        <cylinderGeometry args={[0.15, 0.14, 0.28, 6]} />
+      </instancedMesh>
+    </group>
+  );
 }
 
 function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
@@ -673,7 +905,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
       }
     }
 
-    // Lock-On over-shoulder framing or Citadel free cam
+    // Cinematic intro sweep or Lock-On / Citadel free cam
     const f = w.camFwd;
     playerPos.current.set(p.x, 0, p.z);
     if (w.lockOn && locked) {
@@ -684,6 +916,24 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
       const cp = Math.cos(w.pitch), sp = Math.sin(w.pitch);
       desiredCam.current.set(p.x - f.x * CAM_DIST, CAM_HEIGHT, p.z - f.y * CAM_DIST);
       desiredLook.current.set(p.x + f.x * LOOK_AHEAD * cp, LOOK_HEIGHT + LOOK_AHEAD * sp * 2.2, p.z + f.y * LOOK_AHEAD * cp);
+    }
+    if (w.phase === 'intro') {
+      const st = Math.min(1, w.phaseT / 1.55);
+      const introCamX = Math.sin(st * 1.1) * 7.5;
+      const introCamY = 2.2 + st * 1.65;
+      const introCamZ = -2.5 + st * 14;
+      const aimX = locked?.x ?? 0;
+      const aimZ = locked ? locked.z * (1 - st * 0.5) - 4 * (1 - st) : -6;
+      desiredCam.current.set(
+        THREE.MathUtils.lerp(introCamX, desiredCam.current.x, st * st),
+        THREE.MathUtils.lerp(introCamY, desiredCam.current.y, st * st),
+        THREE.MathUtils.lerp(introCamZ, desiredCam.current.z, st * st),
+      );
+      desiredLook.current.set(
+        THREE.MathUtils.lerp(aimX, desiredLook.current.x, st * st),
+        THREE.MathUtils.lerp(2.2, desiredLook.current.y, st * st),
+        THREE.MathUtils.lerp(aimZ, desiredLook.current.z, st * st),
+      );
     }
     const alpha = 1 - Math.pow(1 - CAM_LERP, dt * 60);
     camPos.current.lerp(desiredCam.current, alpha);
@@ -699,12 +949,15 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
 
   return (
     <>
-      <color attach="background" args={['#06050d']} />
-      <fog attach="fog" args={['#0a0620', 60, 230]} />
-      <SynthwaveHorizon />
+      <color attach="background" args={['#0d0919']} />
+      <fog attach="fog" args={['#170f26', 24, 96]} />
+      <hemisphereLight args={['#8e82c8', '#382218', 0.95]} />
+      <directionalLight position={[18, 30, 14]} intensity={1.35} color="#ffd8a6" />
+      <directionalLight position={[-18, 14, -20]} intensity={0.45} color="#68c6ff" />
+      <Ps1Sky mood="arena" />
       <Starfield playerPosRef={playerPos} />
       <Ring />
-      <Stands />
+      <Stands w={w} />
       <TargetReticle w={w} />
       {w.fighters.map((f, i) => <FighterView key={f.id} w={w} index={i} />)}
       <SlashRibbons pool={w.slashes} />

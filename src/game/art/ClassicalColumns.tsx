@@ -1,11 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { applyGlobeCurvature } from './flat';
-
-interface Props {
-  playerPos: React.MutableRefObject<THREE.Vector3>;
-}
+import { cloneTex, getPs1Texture, makePs1Material } from './ps1Textures';
 
 export interface ColumnMeshProps {
   position: [number, number, number];
@@ -15,224 +12,143 @@ export interface ColumnMeshProps {
   showLabel?: boolean;
 }
 
-/**
- * The Three Classical Orders: Doric, Ionic, Corinthian.
- * Represents the three Masonic pillars (Wisdom, Strength, Beauty).
- * High-fidelity fluted shafts, ornate capitals, and authentic profiles.
- */
+let sharedMats: {
+  stone: THREE.MeshLambertMaterial;
+  stoneAccent: THREE.MeshLambertMaterial;
+  bronze: THREE.MeshLambertMaterial;
+} | null = null;
 
-export function DoricColumn({
-  position,
-  scale = 1.0,
-  rotationY = 0,
-  playerPos,
-  showLabel = false,
-}: ColumnMeshProps) {
+function getColumnMats() {
+  if (!sharedMats) {
+    const stoneTex = cloneTex(getPs1Texture('stone'), 2, 4);
+    const bronzeTex = cloneTex(getPs1Texture('bronze'), 2, 1);
+    sharedMats = {
+      stone: makePs1Material({ color: '#ddd4ea', map: stoneTex }),
+      stoneAccent: makePs1Material({ color: '#b8aecb', map: stoneTex }),
+      bronze: makePs1Material({ color: '#ffd98a', map: bronzeTex }),
+    };
+  }
+  return sharedMats;
+}
+
+/** Doric Order: chunky 10-sided faceted PS1 stone shaft, cushion echinus, and antique-bronze square abacus. */
+export function DoricColumn({ position, scale = 1.0, rotationY = 0, playerPos }: ColumnMeshProps) {
   const ref = useRef<THREE.Group>(null);
+  const mats = useMemo(getColumnMats, []);
   useFrame(() => {
     if (!ref.current) return;
-    const pp = playerPos.current;
-    applyGlobeCurvature(ref.current, position[0], position[1], position[2], pp, rotationY);
+    applyGlobeCurvature(ref.current, position[0], position[1], position[2], playerPos.current, rotationY);
   });
 
-  // Doric Order: NO base (rests directly on stylobate), sturdy fluted shaft, plain cushion echinus + square abacus
   return (
     <group ref={ref} scale={[scale, scale, scale]}>
-      {/* Fluted shaft: 16 facets, sturdy taper */}
-      <mesh position={[0, 4.0, 0]}>
-        <cylinderGeometry args={[0.52, 0.65, 8.0, 16, 1, true]} />
-        <meshBasicMaterial color={0x22d3ee} wireframe transparent opacity={0.55} />
+      <mesh position={[0, 0.16, 0]} material={mats.stoneAccent}>
+        <boxGeometry args={[1.5, 0.32, 1.5]} />
       </mesh>
-      {/* Inner shaft solid body */}
-      <mesh position={[0, 4.0, 0]}>
-        <cylinderGeometry args={[0.48, 0.60, 7.9, 16]} />
-        <meshBasicMaterial color={0x0b051b} transparent opacity={0.7} />
+      <mesh position={[0, 4.1, 0]} material={mats.stone}>
+        <cylinderGeometry args={[0.50, 0.64, 7.6, 10]} />
       </mesh>
-      {/* Capital Necking groove */}
-      <mesh position={[0, 7.9, 0]}>
-        <cylinderGeometry args={[0.54, 0.52, 0.15, 16]} />
-        <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.7} />
+      <mesh position={[0, 7.9, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.56, 0.50, 0.18, 10]} />
       </mesh>
-      {/* Capital: Circular cushion echinus */}
-      <mesh position={[0, 8.15, 0]}>
-        <cylinderGeometry args={[0.82, 0.56, 0.35, 16]} />
-        <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.8} />
+      <mesh position={[0, 8.15, 0]} material={mats.stoneAccent}>
+        <cylinderGeometry args={[0.82, 0.56, 0.36, 10]} />
       </mesh>
-      {/* Capital: Square flat abacus slab */}
-      <mesh position={[0, 8.45, 0]}>
-        <boxGeometry args={[1.5, 0.25, 1.5]} />
-        <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.85} />
+      <mesh position={[0, 8.46, 0]} material={mats.bronze}>
+        <boxGeometry args={[1.55, 0.26, 1.55]} />
       </mesh>
-      <pointLight position={[0, 6, 0]} color={0x22d3ee} intensity={0.35} distance={9} />
     </group>
   );
 }
 
-export function IonicColumn({
-  position,
-  scale = 1.0,
-  rotationY = 0,
-  playerPos,
-  showLabel = false,
-}: ColumnMeshProps) {
+/** Ionic Order: stepped base, faceted shaft, and angular low-poly bronze scroll volutes. */
+export function IonicColumn({ position, scale = 1.0, rotationY = 0, playerPos }: ColumnMeshProps) {
   const ref = useRef<THREE.Group>(null);
+  const mats = useMemo(getColumnMats, []);
   useFrame(() => {
     if (!ref.current) return;
-    const pp = playerPos.current;
-    applyGlobeCurvature(ref.current, position[0], position[1], position[2], pp, rotationY);
+    applyGlobeCurvature(ref.current, position[0], position[1], position[2], playerPos.current, rotationY);
   });
 
-  // Ionic Order: Attic base with torus ring, slender fluted shaft, iconic scrolled paired volutes
   return (
     <group ref={ref} scale={[scale, scale, scale]}>
-      {/* Attic Base: Square plinth + Torus ring + Scotia */}
-      <mesh position={[0, 0.15, 0]}>
-        <boxGeometry args={[1.5, 0.3, 1.5]} />
-        <meshBasicMaterial color={0xa855f7} wireframe transparent opacity={0.65} />
+      <mesh position={[0, 0.16, 0]} material={mats.stoneAccent}>
+        <boxGeometry args={[1.55, 0.32, 1.55]} />
       </mesh>
-      <mesh position={[0, 0.4, 0]}>
-        <cylinderGeometry args={[0.75, 0.85, 0.22, 16]} />
-        <meshBasicMaterial color={0xa855f7} wireframe transparent opacity={0.7} />
+      <mesh position={[0, 0.44, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.66, 0.78, 0.24, 10]} />
       </mesh>
-      <mesh position={[0, 0.55, 0]}>
-        <torusGeometry args={[0.62, 0.08, 6, 16]} />
-        <meshBasicMaterial color={0xfbbf24} transparent opacity={0.8} />
+      <mesh position={[0, 4.4, 0]} material={mats.stone}>
+        <cylinderGeometry args={[0.44, 0.55, 7.7, 10]} />
       </mesh>
-      {/* Slender fluted shaft */}
-      <mesh position={[0, 4.4, 0]}>
-        <cylinderGeometry args={[0.44, 0.54, 7.8, 16, 1, true]} />
-        <meshBasicMaterial color={0xa855f7} wireframe transparent opacity={0.6} />
+      <mesh position={[0, 8.28, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.64, 0.46, 0.28, 10]} />
       </mesh>
-      <mesh position={[0, 4.4, 0]}>
-        <cylinderGeometry args={[0.40, 0.50, 7.7, 16]} />
-        <meshBasicMaterial color={0x0b051b} transparent opacity={0.7} />
-      </mesh>
-      {/* Capital: Central echinus with egg-and-dart band */}
-      <mesh position={[0, 8.25, 0]}>
-        <cylinderGeometry args={[0.62, 0.46, 0.25, 16]} />
-        <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.8} />
-      </mesh>
-      {/* Capital Volutes: Paired horizontal scrolled spiral volutes on left & right */}
-      <group position={[0, 8.4, 0]}>
-        {/* Left spiral scroll */}
-        <mesh position={[0, 0, -0.68]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.35, 0.12, 6, 16]} />
-          <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.9} />
+      <group position={[0, 8.46, 0]}>
+        <mesh position={[0, 0, -0.66]} material={mats.bronze}>
+          <cylinderGeometry args={[0.32, 0.32, 0.34, 8]} />
         </mesh>
-        <mesh position={[0, 0, -0.68]}>
-          <cylinderGeometry args={[0.22, 0.22, 0.3, 12]} />
-          <meshBasicMaterial color={0xa855f7} transparent opacity={0.75} />
+        <mesh position={[0, 0, 0.66]} material={mats.bronze}>
+          <cylinderGeometry args={[0.32, 0.32, 0.34, 8]} />
         </mesh>
-        {/* Right spiral scroll */}
-        <mesh position={[0, 0, 0.68]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.35, 0.12, 6, 16]} />
-          <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.9} />
+        <mesh position={[0, 0.05, 0]} material={mats.stoneAccent}>
+          <boxGeometry args={[1.05, 0.24, 1.4]} />
         </mesh>
-        <mesh position={[0, 0, 0.68]}>
-          <cylinderGeometry args={[0.22, 0.22, 0.3, 12]} />
-          <meshBasicMaterial color={0xa855f7} transparent opacity={0.75} />
-        </mesh>
-        {/* Volute horizontal connecting bolster cushion */}
-        <mesh position={[0, 0.05, 0]}>
-          <boxGeometry args={[1.0, 0.22, 1.4]} />
-          <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.8} />
-        </mesh>
-        {/* Thin molded abacus */}
-        <mesh position={[0, 0.22, 0]}>
-          <boxGeometry args={[1.2, 0.12, 1.6]} />
-          <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.9} />
+        <mesh position={[0, 0.24, 0]} material={mats.bronze}>
+          <boxGeometry args={[1.28, 0.16, 1.66]} />
         </mesh>
       </group>
-      <pointLight position={[0, 6, 0]} color={0xa855f7} intensity={0.4} distance={9} />
     </group>
   );
 }
 
-export function CorinthianColumn({
-  position,
-  scale = 1.0,
-  rotationY = 0,
-  playerPos,
-  showLabel = false,
-}: ColumnMeshProps) {
+/** Corinthian Order: slender 10-sided stone shaft topped with faceted bronze kalathos & triangular leaf petals. */
+export function CorinthianColumn({ position, scale = 1.0, rotationY = 0, playerPos }: ColumnMeshProps) {
   const ref = useRef<THREE.Group>(null);
+  const mats = useMemo(getColumnMats, []);
   useFrame(() => {
     if (!ref.current) return;
-    const pp = playerPos.current;
-    applyGlobeCurvature(ref.current, position[0], position[1], position[2], pp, rotationY);
+    applyGlobeCurvature(ref.current, position[0], position[1], position[2], playerPos.current, rotationY);
   });
 
-  // Corinthian Order: Tiered base, tall fluted shaft, ornate bell-shaped kalathos with carved acanthus leaf petals
   return (
     <group ref={ref} scale={[scale, scale, scale]}>
-      {/* Tiered Attic Base */}
-      <mesh position={[0, 0.15, 0]}>
-        <boxGeometry args={[1.4, 0.3, 1.4]} />
-        <meshBasicMaterial color={0xec4899} wireframe transparent opacity={0.65} />
+      <mesh position={[0, 0.18, 0]} material={mats.stoneAccent}>
+        <boxGeometry args={[1.5, 0.36, 1.5]} />
       </mesh>
-      <mesh position={[0, 0.42, 0]}>
-        <cylinderGeometry args={[0.68, 0.78, 0.25, 16]} />
-        <meshBasicMaterial color={0xec4899} wireframe transparent opacity={0.7} />
+      <mesh position={[0, 0.48, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.62, 0.74, 0.24, 10]} />
       </mesh>
-      <mesh position={[0, 0.6, 0]}>
-        <torusGeometry args={[0.56, 0.07, 6, 16]} />
-        <meshBasicMaterial color={0xfbbf24} transparent opacity={0.8} />
+      <mesh position={[0, 4.55, 0]} material={mats.stone}>
+        <cylinderGeometry args={[0.42, 0.52, 7.9, 10]} />
       </mesh>
-      {/* Tall slender fluted shaft */}
-      <mesh position={[0, 4.6, 0]}>
-        <cylinderGeometry args={[0.40, 0.50, 8.0, 16, 1, true]} />
-        <meshBasicMaterial color={0xec4899} wireframe transparent opacity={0.65} />
+      <mesh position={[0, 8.78, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.74, 0.44, 0.88, 8]} />
       </mesh>
-      <mesh position={[0, 4.6, 0]}>
-        <cylinderGeometry args={[0.36, 0.46, 7.9, 16]} />
-        <meshBasicMaterial color={0x0b051b} transparent opacity={0.7} />
-      </mesh>
-      {/* Ornate Corinthian Capital: Bell-shaped Kalathos core */}
-      <mesh position={[0, 8.8, 0]}>
-        <cylinderGeometry args={[0.75, 0.42, 0.9, 16]} />
-        <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.75} />
-      </mesh>
-      {/* Tier 1: 8 Acanthus leaf fronds outward curling at base of kalathos */}
-      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
-        const angle = (i * Math.PI * 2) / 8;
+      {[0, 1, 2, 3, 4, 5].map((i) => {
+        const angle = (i * Math.PI * 2) / 6;
         return (
-          <group key={`leaf1-${i}`} position={[Math.cos(angle) * 0.48, 8.55, Math.sin(angle) * 0.48]} rotation={[0.25 * Math.sin(angle), -angle, 0.25 * Math.cos(angle)]}>
-            <mesh>
-              <coneGeometry args={[0.14, 0.5, 4]} />
-              <meshBasicMaterial color={0x34d399} wireframe transparent opacity={0.85} />
+          <group
+            key={i}
+            position={[Math.cos(angle) * 0.56, 8.78, Math.sin(angle) * 0.56]}
+            rotation={[0.3 * Math.sin(angle), -angle, 0.3 * Math.cos(angle)]}
+          >
+            <mesh material={mats.bronze}>
+              <coneGeometry args={[0.17, 0.58, 3]} />
             </mesh>
           </group>
         );
       })}
-      {/* Tier 2: 8 Acanthus leaves flaring higher between lower tier */}
-      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
-        const angle = ((i + 0.5) * Math.PI * 2) / 8;
-        return (
-          <group key={`leaf2-${i}`} position={[Math.cos(angle) * 0.62, 8.95, Math.sin(angle) * 0.62]} rotation={[0.38 * Math.sin(angle), -angle, 0.38 * Math.cos(angle)]}>
-            <mesh>
-              <coneGeometry args={[0.16, 0.6, 4]} />
-              <meshBasicMaterial color={0xec4899} wireframe transparent opacity={0.9} />
-            </mesh>
-          </group>
-        );
-      })}
-      {/* Molded abacus with concave faceted sides */}
-      <mesh position={[0, 9.35, 0]}>
-        <boxGeometry args={[1.5, 0.18, 1.5]} />
-        <meshBasicMaterial color={0xfbbf24} wireframe transparent opacity={0.9} />
+      <mesh position={[0, 9.32, 0]} material={mats.stoneAccent}>
+        <boxGeometry args={[1.56, 0.22, 1.56]} />
       </mesh>
-      {/* Central flower finial on abacus edge */}
-      <mesh position={[0, 9.46, 0]}>
-        <octahedronGeometry args={[0.14, 0]} />
-        <meshBasicMaterial color={0xec4899} transparent opacity={0.95} />
+      <mesh position={[0, 9.56, 0]} material={mats.bronze}>
+        <coneGeometry args={[0.2, 0.32, 4]} />
       </mesh>
-      <pointLight position={[0, 6, 0]} color={0xec4899} intensity={0.45} distance={10} />
     </group>
   );
 }
 
-// Backward-compatible aliases
 export const DoricColumnMesh = DoricColumn;
 export const IonicColumnMesh = IonicColumn;
 export const CorinthianColumnMesh = CorinthianColumn;
-
