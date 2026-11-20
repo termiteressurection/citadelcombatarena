@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Atk } from './combat';
-import type { StyleId } from './styles';
+import { moveOf, type StyleId } from './styles';
 
 interface Shard { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number; color: THREE.Color }
 
@@ -105,18 +105,22 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
   const roots = useRef<(THREE.Group | null)[]>([]);
   const arcs = useRef<(THREE.Mesh | null)[]>([]);
   const rings = useRef<(THREE.Mesh | null)[]>([]);
+  const lances = useRef<(THREE.Mesh | null)[]>([]);
 
-  const { arcGeo, ringGeo, mats } = useMemo(() => {
+  const { arcGeo, ringGeo, lanceGeo, mats } = useMemo(() => {
     const a = new THREE.RingGeometry(0.95, 2.35, 20, 1, -1.1, 2.2);
     a.rotateX(-Math.PI / 2);
     a.rotateY(-Math.PI / 2);
     const r = new THREE.RingGeometry(0.5, 0.85, 24);
     r.rotateX(-Math.PI / 2);
+    const l = new THREE.ConeGeometry(0.24, 2.8, 5);
+    l.translate(0, 1.4, 0);
+    l.rotateX(Math.PI / 2);
     const ms = Array.from({ length: SlashPool.CAP }, () => new THREE.MeshBasicMaterial({
       color: '#ffffff', transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
     }));
-    return { arcGeo: a, ringGeo: r, mats: ms };
+    return { arcGeo: a, ringGeo: r, lanceGeo: l, mats: ms };
   }, []);
 
   useFrame(() => {
@@ -125,7 +129,8 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
       const root = roots.current[i];
       const arc = arcs.current[i];
       const ring = rings.current[i];
-      if (!root || !arc || !ring) continue;
+      const lance = lances.current[i];
+      if (!root || !arc || !ring || !lance) continue;
       if (!s.active) {
         root.visible = false;
         continue;
@@ -139,34 +144,46 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
       mat.color.copy(s.color);
       mat.opacity = (1 - p) * (1 - p) * 0.92;
 
-      if (s.kind === 'bash' || s.kind === 'parry' || (s.style === 'retiarius' && s.kind === 'heavy')) {
+      const motion = s.kind === 'parry' ? 'parry' : moveOf(s.style, s.kind).motion;
+      if (motion === 'bash' || motion === 'parry' || motion === 'netThrow') {
         arc.visible = false;
+        lance.visible = false;
         ring.visible = true;
-        const sc = s.kind === 'parry' ? 0.7 + p * 2.6 : s.style === 'retiarius' && s.kind === 'heavy' ? 0.9 + p * 3.8 : 0.6 + p * 1.9;
+        const sc = s.kind === 'parry' ? 0.7 + p * 2.8 : motion === 'netThrow' ? 0.9 + p * 3.8 : 0.6 + p * 1.9;
         ring.scale.setScalar(sc);
+      } else if (motion === 'thrust') {
+        arc.visible = false;
+        ring.visible = false;
+        lance.visible = true;
+        const heavyThrust = s.kind === 'heavy' || s.kind === 'light3';
+        const fwdBoost = 0.65 + p * (heavyThrust ? 1.1 : 0.6);
+        lance.position.set(0, 0.05, 0.35 + p * 0.85);
+        lance.scale.set(heavyThrust ? 1.35 : 0.9, heavyThrust ? 1.35 : 0.9, fwdBoost * (s.kind === 'heavy' ? 1.45 : 1.0));
       } else {
         arc.visible = true;
-        ring.visible = false;
+        ring.visible = motion === 'crush' && p > 0.25;
+        lance.visible = motion === 'twinCross';
         arc.position.set(0, 0, 0);
         const stScale = s.style === 'executioner' ? 1.38 : s.style === 'dimachaerus' ? 0.95 : 1.0;
-        const isThrust = (s.style === 'hoplomachus' || s.style === 'retiarius') && s.kind !== 'heavy';
-        if (s.kind === 'light') {
-          arc.rotation.set(0, THREE.MathUtils.lerp(-0.55, 0.55, p), 0.24);
-          if (isThrust) arc.scale.set(0.65, 1, 1.45);
-          else arc.scale.setScalar(1.0 * stScale);
-        } else if (s.kind === 'light2') {
+        if (motion === 'sweep') {
+          arc.rotation.set(0, THREE.MathUtils.lerp(-0.85, 0.85, p), 0.16);
+          arc.scale.setScalar(1.38 * stScale);
+        } else if (motion === 'crush' || motion === 'overhead' || motion === 'twinSlash') {
+          arc.rotation.set(THREE.MathUtils.lerp(-0.45, 0.38, p), 0, Math.PI / 2);
+          arc.position.set(0, 0.18, 0);
+          arc.scale.setScalar((motion === 'crush' ? 1.3 : 1.18) * stScale);
+          if (ring.visible) ring.scale.setScalar(0.8 + p * 2.4);
+        } else if (motion === 'twinCross') {
+          arc.rotation.set(0, THREE.MathUtils.lerp(-0.65, 0.7, p), 0.45);
+          arc.scale.setScalar(1.22 * stScale);
+          lance.position.set(0, 0.05, 0.3);
+          lance.scale.set(1.2, 0.7, 0.8 + p * 0.5);
+        } else if (motion === 'backhand') {
           arc.rotation.set(0, THREE.MathUtils.lerp(0.55, -0.55, p), -0.24);
-          if (isThrust) arc.scale.set(0.65, 1, 1.5);
-          else arc.scale.setScalar(1.04 * stScale);
-        } else if (s.kind === 'light3') {
-          arc.rotation.set(0, THREE.MathUtils.lerp(-0.65, 0.7, p), 0.48);
-          if (isThrust) arc.scale.set(0.7, 1, 1.6);
-          else arc.scale.setScalar(1.22 * stScale);
+          arc.scale.setScalar(1.04 * stScale);
         } else {
-          // heavy vertical overhead cleave
-          arc.rotation.set(THREE.MathUtils.lerp(-0.45, 0.35, p), 0, Math.PI / 2);
-          arc.position.set(0, 0.15, 0);
-          arc.scale.setScalar(1.18 * stScale);
+          arc.rotation.set(0, THREE.MathUtils.lerp(-0.55, 0.55, p), 0.24);
+          arc.scale.setScalar(1.0 * stScale);
         }
       }
     }
@@ -178,6 +195,7 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
         <group key={i} ref={(el) => { roots.current[i] = el; }} visible={false}>
           <mesh ref={(el) => { arcs.current[i] = el; }} geometry={arcGeo} material={mats[i]} />
           <mesh ref={(el) => { rings.current[i] = el; }} geometry={ringGeo} material={mats[i]} />
+          <mesh ref={(el) => { lances.current[i] = el; }} geometry={lanceGeo} material={mats[i]} />
         </group>
       ))}
     </group>

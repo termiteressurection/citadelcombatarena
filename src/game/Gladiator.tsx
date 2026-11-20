@@ -2,7 +2,7 @@ import { forwardRef, useRef, useImperativeHandle, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Atk, LimbKey, State } from './arena/combat';
-import type { ArmorKey, StyleId } from './arena/styles';
+import { moveOf, type ArmorKey, type StyleId } from './arena/styles';
 import { getPs1Texture, makePs1Material } from './art/ps1Textures';
 
 export type LimbPose = Record<LimbKey, { ratio: number; severed: boolean }>;
@@ -31,6 +31,12 @@ export interface Pose {
   armor?: Record<ArmorKey, boolean>;
   /** seconds remaining in energy net snare */
   snared?: number;
+  /** active parry deflect stance (0..1) */
+  parryReady?: number;
+  /** incoming enemy strike inside final parry window flash (0..1) */
+  parryFlash?: number;
+  /** riposte empowerment ready/active (0..1) */
+  riposte?: number;
 }
 
 export interface GladiatorHandle { group: THREE.Group; pose: Pose; setMoving: (speed01: number) => void }
@@ -132,13 +138,17 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       }
 
       if (glintMesh.current) {
-        const showGlint = p.telegraph > 0.08;
+        const pf = p.parryFlash ?? 0;
+        const showGlint = pf > 0.05 || p.telegraph > 0.08;
         glintMesh.current.visible = showGlint;
         if (showGlint) {
-          const s = 0.65 + p.telegraph * 1.15 + Math.sin(clock.elapsedTime * 36) * 0.25;
+          const s = pf > 0.05
+            ? 1.2 + pf * 1.45 + Math.sin(clock.elapsedTime * 48) * 0.35
+            : 0.65 + p.telegraph * 1.15 + Math.sin(clock.elapsedTime * 36) * 0.25;
+          mats.glint.color.set(pf > 0.05 ? '#ffe780' : '#ff8a5c');
           glintMesh.current.scale.setScalar(s);
-          glintMesh.current.rotation.y = clock.elapsedTime * 10;
-          glintMesh.current.rotation.z = clock.elapsedTime * 7;
+          glintMesh.current.rotation.y = clock.elapsedTime * 12;
+          glintMesh.current.rotation.z = clock.elapsedTime * 9;
         }
       }
 
@@ -172,10 +182,16 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       let kneeRX = 0.26 * st + Math.max(0, cs) * 0.85 * moveMag;
 
       // Left arm (+X)
+      const parryStance = p.state === 'idle' ? (p.parryReady ?? 0) : 0;
       let shLX = THREE.MathUtils.lerp(-0.32 * st + sw * 0.3, -0.92, p.block);
       let shLY = THREE.MathUtils.lerp(0, -0.35, p.block);
       let shLZ = THREE.MathUtils.lerp(0.18, 0.05, p.block);
       let elLX = THREE.MathUtils.lerp(-0.45 - 0.45 * st, -1.25, p.block);
+      if (parryStance > 0.1) {
+        shLX = THREE.MathUtils.lerp(shLX, -1.22, parryStance);
+        shLY = THREE.MathUtils.lerp(shLY, -0.58, parryStance);
+        elLX = THREE.MathUtils.lerp(elLX, -0.92, parryStance);
+      }
 
       // Right arm (-X)
       let shRX = -0.38 * st - sw * 0.35;
@@ -199,7 +215,7 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
         elRX += 0.25;
       }
 
-      let blend = 14;
+      let blend = parryStance > 0.1 ? 26 : 14;
       const k = Math.max(0, Math.min(1, p.progress));
 
       if (p.state === 'dodge') {
@@ -222,106 +238,227 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
         shLX = -0.2; shRX = -0.2;
         blend = 20;
       } else if (p.atk && (p.state === 'windup' || p.state === 'strike' || p.state === 'recover')) {
-        blend = p.state === 'strike' ? 28 : 18;
-        if (p.atk === 'light') {
-          if (p.state === 'windup') {
-            upperY = THREE.MathUtils.lerp(-0.28, -0.78, k);
-            shRX = THREE.MathUtils.lerp(-0.38, -1.12, k);
-            shRZ = THREE.MathUtils.lerp(-0.26, -0.95, k);
-            elRX = -0.75;
-          } else if (p.state === 'strike') {
-            upperY = THREE.MathUtils.lerp(-0.78, 0.85, k);
-            upperX = 0.28;
-            shRX = THREE.MathUtils.lerp(-1.12, -1.35, k);
-            shRZ = THREE.MathUtils.lerp(-0.95, 0.92, k);
-            elRX = -0.22;
-          } else {
-            upperY = THREE.MathUtils.lerp(0.85, -0.28, k);
-            shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
-            shRZ = THREE.MathUtils.lerp(0.92, -0.26, k);
-            elRX = THREE.MathUtils.lerp(-0.22, -0.8, k);
+        const motion = moveOf(style, p.atk).motion;
+        blend = p.state === 'strike' ? 30 : 18;
+        switch (motion) {
+          case 'thrust': {
+            const hvy = p.atk === 'heavy';
+            if (p.state === 'windup') {
+              pelvisY -= (hvy ? 0.18 : 0.08) * k;
+              upperY = THREE.MathUtils.lerp(-0.28, -1.08, k);
+              upperX = THREE.MathUtils.lerp(0.14, hvy ? -0.15 : 0.05, k);
+              shRX = THREE.MathUtils.lerp(-0.38, 0.58, k);
+              shRZ = -0.14;
+              elRX = THREE.MathUtils.lerp(-0.6, -1.65, k);
+              shLX = THREE.MathUtils.lerp(-0.35, -0.85, k);
+            } else if (p.state === 'strike') {
+              pelvisY -= hvy ? 0.16 : 0.08;
+              upperY = THREE.MathUtils.lerp(-1.08, 0.62, k);
+              upperX = hvy ? 0.48 : 0.32;
+              shRX = THREE.MathUtils.lerp(0.58, -1.55, k);
+              shRZ = THREE.MathUtils.lerp(-0.14, 0.08, k);
+              elRX = THREE.MathUtils.lerp(-1.65, -0.02, k);
+              shLX = 0.25;
+            } else {
+              upperX = THREE.MathUtils.lerp(hvy ? 0.48 : 0.32, 0.14, k);
+              upperY = THREE.MathUtils.lerp(0.62, -0.28, k);
+              shRX = THREE.MathUtils.lerp(-1.55, -0.38, k);
+              elRX = THREE.MathUtils.lerp(-0.02, -0.78, k);
+            }
+            break;
           }
-        } else if (p.atk === 'light2') {
-          if (p.state === 'windup') {
-            upperY = THREE.MathUtils.lerp(0.45, 0.88, k);
-            shRX = -1.15;
-            shRZ = THREE.MathUtils.lerp(0.4, 0.9, k);
-            elRX = -0.5;
-            if (style === 'dimachaerus') { shLX = -1.1; shLZ = 0.85; elLX = -0.4; }
-          } else if (p.state === 'strike') {
-            upperY = THREE.MathUtils.lerp(0.88, -0.88, k);
-            upperX = 0.28;
-            shRX = -1.35;
-            shRZ = THREE.MathUtils.lerp(0.9, -1.05, k);
-            elRX = -0.2;
-            if (style === 'dimachaerus') { shLX = -1.35; shLZ = THREE.MathUtils.lerp(0.85, -0.95, k); elLX = -0.2; }
-          } else {
-            upperY = THREE.MathUtils.lerp(-0.88, -0.28, k);
-            shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
-            shRZ = THREE.MathUtils.lerp(-1.05, -0.26, k);
-            elRX = THREE.MathUtils.lerp(-0.2, -0.8, k);
+          case 'sweep': {
+            if (p.state === 'windup') {
+              pelvisY -= 0.12 * k;
+              upperY = THREE.MathUtils.lerp(-0.28, -1.35, k);
+              shRX = -1.25;
+              shRZ = THREE.MathUtils.lerp(-0.3, -1.35, k);
+              elRX = -0.35;
+              shLX = -1.05; shLZ = -0.45;
+            } else if (p.state === 'strike') {
+              upperY = THREE.MathUtils.lerp(-1.35, 1.35, k);
+              upperX = 0.36;
+              shRX = -1.35;
+              shRZ = THREE.MathUtils.lerp(-1.35, 1.15, k);
+              elRX = -0.12;
+              shLX = -0.9; shLZ = 0.65;
+            } else {
+              upperY = THREE.MathUtils.lerp(1.35, -0.28, k);
+              shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
+              shRZ = THREE.MathUtils.lerp(1.15, -0.26, k);
+              elRX = THREE.MathUtils.lerp(-0.12, -0.8, k);
+            }
+            break;
           }
-        } else if (p.atk === 'light3') {
-          if (p.state === 'windup') {
-            pelvisY -= 0.14 * k;
-            upperY = THREE.MathUtils.lerp(-0.4, -0.98, k);
-            shRX = THREE.MathUtils.lerp(-0.5, -2.25, k);
-            shRZ = -0.58;
-            elRX = -0.42;
-            if (style === 'dimachaerus') { shLX = -2.2; shLZ = 0.58; elLX = -0.4; }
-          } else if (p.state === 'strike') {
-            pelvisY -= 0.08 * (1 - k);
-            upperX = 0.42;
-            upperY = THREE.MathUtils.lerp(-0.98, 1.05, k);
-            shRX = THREE.MathUtils.lerp(-2.25, -0.32, k);
-            shRZ = THREE.MathUtils.lerp(-0.58, 0.72, k);
-            elRX = -0.14;
-            if (style === 'dimachaerus') { shLX = THREE.MathUtils.lerp(-2.2, -0.32, k); shLZ = THREE.MathUtils.lerp(0.58, -0.72, k); elLX = -0.14; }
-          } else {
-            upperX = THREE.MathUtils.lerp(0.42, 0.14, k);
-            upperY = THREE.MathUtils.lerp(1.05, -0.28, k);
-            shRX = THREE.MathUtils.lerp(-0.32, -0.38, k);
-            shRZ = THREE.MathUtils.lerp(0.72, -0.26, k);
-            elRX = THREE.MathUtils.lerp(-0.14, -0.8, k);
+          case 'crush': {
+            if (p.state === 'windup') {
+              pelvisY += 0.06 * k;
+              upperX = THREE.MathUtils.lerp(0.14, -0.35, k);
+              upperY = THREE.MathUtils.lerp(-0.28, -0.3, k);
+              shRX = THREE.MathUtils.lerp(-0.4, -3.0, k);
+              shLX = THREE.MathUtils.lerp(-0.35, -2.65, k);
+              shRZ = -0.1; shLZ = 0.25;
+              elRX = -0.28; elLX = -0.35;
+            } else if (p.state === 'strike') {
+              pelvisY -= 0.24 * k;
+              upperX = THREE.MathUtils.lerp(-0.35, 0.62, k);
+              upperY = THREE.MathUtils.lerp(-0.3, 0.25, k);
+              shRX = THREE.MathUtils.lerp(-3.0, 0.25, k);
+              shLX = THREE.MathUtils.lerp(-2.65, 0.15, k);
+              elRX = -0.08; elLX = -0.15;
+            } else {
+              pelvisY -= 0.24 * (1 - k);
+              upperX = THREE.MathUtils.lerp(0.62, 0.14, k);
+              upperY = THREE.MathUtils.lerp(0.25, -0.28, k);
+              shRX = THREE.MathUtils.lerp(0.25, -0.38, k);
+              elRX = THREE.MathUtils.lerp(-0.08, -0.8, k);
+            }
+            break;
           }
-        } else if (p.atk === 'heavy') {
-          if (p.state === 'windup') {
-            upperX = THREE.MathUtils.lerp(0.14, -0.22, k);
-            upperY = THREE.MathUtils.lerp(-0.28, -0.45, k);
-            shRX = THREE.MathUtils.lerp(-0.4, -2.85, k);
-            shRZ = -0.1;
-            elRX = -0.35;
-            if (style === 'dimachaerus') { shLX = -2.7; shLZ = 0.5; elLX = -0.35; }
-            if (style === 'retiarius') { shLX = -1.6; shLZ = 0.5; elLX = -0.6; }
-          } else if (p.state === 'strike') {
-            pelvisY -= 0.16 * k;
-            upperX = THREE.MathUtils.lerp(-0.22, 0.48, k);
-            upperY = THREE.MathUtils.lerp(-0.45, 0.35, k);
-            shRX = THREE.MathUtils.lerp(-2.85, -0.15, k);
-            elRX = -0.1;
-            if (style === 'dimachaerus') { shLX = THREE.MathUtils.lerp(-2.7, -0.15, k); shLZ = -0.45; elLX = -0.1; }
-            if (style === 'retiarius') { shLX = -1.1; shLZ = -0.35; elLX = -0.2; }
-          } else {
-            pelvisY -= 0.16 * (1 - k);
-            upperX = THREE.MathUtils.lerp(0.48, 0.14, k);
-            upperY = THREE.MathUtils.lerp(0.35, -0.28, k);
-            shRX = THREE.MathUtils.lerp(-0.15, -0.38, k);
-            elRX = THREE.MathUtils.lerp(-0.1, -0.8, k);
+          case 'twinCross': {
+            if (p.state === 'windup') {
+              pelvisY -= 0.14 * k;
+              shRX = -1.25; shLX = -1.25;
+              shRZ = THREE.MathUtils.lerp(-0.3, -1.25, k);
+              shLZ = THREE.MathUtils.lerp(0.3, 1.25, k);
+              elRX = -0.25; elLX = -0.25;
+            } else if (p.state === 'strike') {
+              pelvisY -= 0.08 * (1 - k);
+              upperX = 0.42;
+              shRX = -1.35; shLX = -1.35;
+              shRZ = THREE.MathUtils.lerp(-1.25, 0.9, k);
+              shLZ = THREE.MathUtils.lerp(1.25, -0.9, k);
+              elRX = -0.15; elLX = -0.15;
+            } else {
+              upperX = THREE.MathUtils.lerp(0.42, 0.14, k);
+              shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
+              shLX = THREE.MathUtils.lerp(-1.35, -0.32, k);
+              shRZ = THREE.MathUtils.lerp(0.9, -0.26, k);
+              shLZ = THREE.MathUtils.lerp(-0.9, 0.18, k);
+            }
+            break;
           }
-        } else if (p.atk === 'bash') {
-          if (p.state === 'windup') {
-            upperY = THREE.MathUtils.lerp(-0.28, 0.45, k);
-            shLX = -0.65; shLY = 0.2; elLX = -1.45;
-          } else if (p.state === 'strike') {
-            upperY = THREE.MathUtils.lerp(0.45, -0.82, k);
-            upperX = 0.34;
-            shLX = -1.45; shLY = -0.25; elLX = -0.38;
-            shRX = 0.45;
-          } else {
-            upperY = THREE.MathUtils.lerp(-0.82, -0.28, k);
-            upperX = THREE.MathUtils.lerp(0.34, 0.14, k);
-            shLX = THREE.MathUtils.lerp(-1.45, -0.32, k);
-            elLX = THREE.MathUtils.lerp(-0.38, -0.9, k);
+          case 'twinSlash': {
+            if (p.state === 'windup') {
+              upperX = THREE.MathUtils.lerp(0.14, -0.22, k);
+              shRX = THREE.MathUtils.lerp(-0.4, -2.75, k);
+              shLX = THREE.MathUtils.lerp(-0.35, -2.7, k);
+              shRZ = -0.45; shLZ = 0.5;
+              elRX = -0.35; elLX = -0.35;
+            } else if (p.state === 'strike') {
+              pelvisY -= 0.16 * k;
+              upperX = THREE.MathUtils.lerp(-0.22, 0.5, k);
+              shRX = THREE.MathUtils.lerp(-2.75, -0.15, k);
+              shLX = THREE.MathUtils.lerp(-2.7, -0.15, k);
+              shRZ = 0.35; shLZ = -0.45;
+              elRX = -0.1; elLX = -0.1;
+            } else {
+              pelvisY -= 0.16 * (1 - k);
+              upperX = THREE.MathUtils.lerp(0.5, 0.14, k);
+              shRX = THREE.MathUtils.lerp(-0.15, -0.38, k);
+              shLX = THREE.MathUtils.lerp(-0.15, -0.32, k);
+            }
+            break;
+          }
+          case 'netThrow': {
+            if (p.state === 'windup') {
+              upperY = THREE.MathUtils.lerp(-0.28, 1.05, k);
+              shLX = THREE.MathUtils.lerp(-0.4, -1.65, k);
+              shLZ = THREE.MathUtils.lerp(0.2, 1.15, k);
+              elLX = -0.55;
+            } else if (p.state === 'strike') {
+              upperY = THREE.MathUtils.lerp(1.05, -1.05, k);
+              upperX = 0.34;
+              shLX = -1.25;
+              shLZ = THREE.MathUtils.lerp(1.15, -0.75, k);
+              elLX = -0.15;
+            } else {
+              upperY = THREE.MathUtils.lerp(-1.05, -0.28, k);
+              shLX = THREE.MathUtils.lerp(-1.25, -0.32, k);
+              shLZ = THREE.MathUtils.lerp(-0.75, 0.18, k);
+            }
+            break;
+          }
+          case 'backhand': {
+            if (p.state === 'windup') {
+              upperY = THREE.MathUtils.lerp(0.45, 0.88, k);
+              shRX = -1.15;
+              shRZ = THREE.MathUtils.lerp(0.4, 0.9, k);
+              elRX = -0.5;
+              if (style === 'dimachaerus') { shLX = -1.1; shLZ = 0.85; elLX = -0.4; }
+            } else if (p.state === 'strike') {
+              upperY = THREE.MathUtils.lerp(0.88, -0.88, k);
+              upperX = 0.28;
+              shRX = -1.35;
+              shRZ = THREE.MathUtils.lerp(0.9, -1.05, k);
+              elRX = -0.2;
+              if (style === 'dimachaerus') { shLX = -1.35; shLZ = THREE.MathUtils.lerp(0.85, -0.95, k); elLX = -0.2; }
+            } else {
+              upperY = THREE.MathUtils.lerp(-0.88, -0.28, k);
+              shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
+              shRZ = THREE.MathUtils.lerp(-1.05, -0.26, k);
+              elRX = THREE.MathUtils.lerp(-0.2, -0.8, k);
+            }
+            break;
+          }
+          case 'overhead': {
+            if (p.state === 'windup') {
+              upperX = THREE.MathUtils.lerp(0.14, -0.22, k);
+              upperY = THREE.MathUtils.lerp(-0.28, -0.45, k);
+              shRX = THREE.MathUtils.lerp(-0.4, -2.85, k);
+              shRZ = -0.1;
+              elRX = -0.35;
+            } else if (p.state === 'strike') {
+              pelvisY -= 0.16 * k;
+              upperX = THREE.MathUtils.lerp(-0.22, 0.48, k);
+              upperY = THREE.MathUtils.lerp(-0.45, 0.35, k);
+              shRX = THREE.MathUtils.lerp(-2.85, -0.15, k);
+              elRX = -0.1;
+            } else {
+              pelvisY -= 0.16 * (1 - k);
+              upperX = THREE.MathUtils.lerp(0.48, 0.14, k);
+              upperY = THREE.MathUtils.lerp(0.35, -0.28, k);
+              shRX = THREE.MathUtils.lerp(-0.15, -0.38, k);
+              elRX = THREE.MathUtils.lerp(-0.1, -0.8, k);
+            }
+            break;
+          }
+          case 'bash': {
+            if (p.state === 'windup') {
+              upperY = THREE.MathUtils.lerp(-0.28, 0.45, k);
+              shLX = -0.65; shLY = 0.2; elLX = -1.45;
+            } else if (p.state === 'strike') {
+              upperY = THREE.MathUtils.lerp(0.45, -0.82, k);
+              upperX = 0.34;
+              shLX = -1.45; shLY = -0.25; elLX = -0.38;
+              shRX = 0.45;
+            } else {
+              upperY = THREE.MathUtils.lerp(-0.82, -0.28, k);
+              upperX = THREE.MathUtils.lerp(0.34, 0.14, k);
+              shLX = THREE.MathUtils.lerp(-1.45, -0.32, k);
+              elLX = THREE.MathUtils.lerp(-0.38, -0.9, k);
+            }
+            break;
+          }
+          default: {
+            // slash
+            if (p.state === 'windup') {
+              upperY = THREE.MathUtils.lerp(-0.28, -0.78, k);
+              shRX = THREE.MathUtils.lerp(-0.38, -1.12, k);
+              shRZ = THREE.MathUtils.lerp(-0.26, -0.95, k);
+              elRX = -0.75;
+            } else if (p.state === 'strike') {
+              upperY = THREE.MathUtils.lerp(-0.78, 0.85, k);
+              upperX = 0.28;
+              shRX = THREE.MathUtils.lerp(-1.12, -1.35, k);
+              shRZ = THREE.MathUtils.lerp(-0.95, 0.92, k);
+              elRX = -0.22;
+            } else {
+              upperY = THREE.MathUtils.lerp(0.85, -0.28, k);
+              shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
+              shRZ = THREE.MathUtils.lerp(0.92, -0.26, k);
+              elRX = THREE.MathUtils.lerp(-0.22, -0.8, k);
+            }
           }
         }
       }
@@ -398,16 +535,19 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       tint(mats.legL, limbs?.legL.ratio ?? 1);
       tint(mats.legR, limbs?.legR.ratio ?? 1);
 
-      mats.blade.color.copy(colors.white).lerp(colors.warn, p.telegraph);
-      mats.blade.emissive.copy(p.telegraph > 0.1 ? colors.warn : colors.gear);
-      mats.blade.emissiveIntensity = 0.28 + p.telegraph * 0.8;
+      const gold = colors.amber;
+      const rip = p.riposte ?? 0;
+      mats.blade.color.copy(colors.white).lerp(colors.warn, p.telegraph).lerp(gold, rip * 0.85);
+      mats.blade.emissive.copy(p.telegraph > 0.1 ? colors.warn : rip > 0.1 ? gold : colors.gear);
+      mats.blade.emissiveIntensity = Math.max(0.28 + p.telegraph * 0.8, rip * 0.95);
 
-      mats.gearPaint.color.copy(colors.gear).lerp(colors.warn, p.telegraph).lerp(colors.white, p.hurt);
-      mats.gearPaint.emissive.copy(colors.gear).lerp(colors.warn, p.telegraph);
-      mats.gearPaint.emissiveIntensity = p.telegraph * 0.6 + p.hurt * 0.5;
+      mats.gearPaint.color.copy(colors.gear).lerp(colors.warn, p.telegraph).lerp(gold, parryStance * 0.7).lerp(colors.white, p.hurt);
+      mats.gearPaint.emissive.copy(parryStance > 0.1 ? gold : colors.gear).lerp(colors.warn, p.telegraph);
+      mats.gearPaint.emissiveIntensity = Math.max(p.telegraph * 0.6 + p.hurt * 0.5, parryStance * 0.85);
 
-      mats.trim.color.copy(colors.trim).lerp(colors.warn, p.telegraph).lerp(colors.white, p.hurt);
-      mats.trim.emissiveIntensity = 0.14 + p.telegraph * 0.5 + p.hurt * 0.4;
+      mats.trim.color.copy(colors.trim).lerp(colors.warn, p.telegraph).lerp(gold, Math.max(parryStance, rip)).lerp(colors.white, p.hurt);
+      mats.trim.emissive.copy(parryStance > 0.1 || rip > 0.1 ? gold : colors.trim);
+      mats.trim.emissiveIntensity = Math.max(0.14 + p.telegraph * 0.5 + p.hurt * 0.4, parryStance * 0.95, rip * 0.75);
     });
 
     return (

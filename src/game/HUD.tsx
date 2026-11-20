@@ -105,6 +105,7 @@ function StationPanel() {
                   {eq && <span style={{ fontSize: 10, color: '#4dffa0' }}>EQUIPPED</span>}
                 </div>
                 <div style={{ fontSize: 10, letterSpacing: '.04em', color: '#e9e6ff', opacity: 0.85 }}>{st.tagline}</div>
+                <div style={{ fontSize: 10, letterSpacing: '.06em', color: '#ffc95c', opacity: 0.9 }}>Heavy: {st.moves.heavy.name}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 10px', marginTop: 2 }}>
                   <MiniStat label="DMG" pct={bars.dmg} color={st.color} />
                   <MiniStat label="REACH" pct={bars.reach} color={st.color} />
@@ -379,7 +380,7 @@ function ArenaHud() {
         <KeyCap k="LMB/J" label="Combo" />
         <KeyCap k="RMB/K" label="Heavy" />
         <KeyCap k="F" label="Bash" />
-        <KeyCap k="SHIFT" label="Guard" />
+        <KeyCap k="SHIFT" label="Tap Parry / Hold Block" />
         <KeyCap k="SPACE" label="Dodge" />
         <KeyCap k="TAB" label="Lock" />
         <KeyCap k="P" label="CRT" />

@@ -6,7 +6,7 @@ import { Brazier, Ps1Sky } from './art/Ps1Sky';
 import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import Starfield from './art/Starfield';
 import {
-  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, defaultMods, makeFighter, resolveStrike, stepFighter,
+  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, defaultMods, makeFighter, parryWindowOf, resolveStrike, stepFighter, windupOf,
   type Fighter, type HitEvent, type Intent, type LimbKey,
 } from './arena/combat';
 import { ARENA_RADIUS, createArenaWorld, initPhysics, RAPIER } from './arena/physics';
@@ -46,7 +46,7 @@ interface ArenaWorld {
   phaseT: number;
   ragVersion: number;
   debrisVersion: number;
-  buf: { light: number; heavy: number; bash: number; dodge: number };
+  buf: { light: number; heavy: number; bash: number; dodge: number; parry: number };
   camFwd: THREE.Vector2;
   yaw: number;
   pitch: number;
@@ -79,7 +79,7 @@ function newWorld(bout: number, roster: BoutEnemy[], boons: string[], carry: num
     shards: new ShardPool(), slashes: new SlashPool(), ghosts: new GhostPool(),
     hitstop: 0, shake: 0, fovKick: 0, time: 0, acc: 0,
     phase: 'intro', phaseT: 0, ragVersion: 0, debrisVersion: 0,
-    buf: { light: 0, heavy: 0, bash: 0, dodge: 0 },
+    buf: { light: 0, heavy: 0, bash: 0, dodge: 0, parry: 0 },
     camFwd: new THREE.Vector2(0, -1), yaw: 0, pitch: 0,
     lockOn: true, lockedId: fighters[1]?.id ?? null, calloutId: 0, settled: false,
   };
@@ -103,10 +103,10 @@ function onHit(w: ArenaWorld, e: HitEvent) {
   const a = w.fighters.find((f) => f.id === e.attacker)!;
   const y = 1.3;
   if (e.type === 'parry') {
-    w.hitstop = Math.max(w.hitstop, 0.16); w.shake = Math.max(w.shake, 0.55); w.fovKick = -7;
-    w.shards.burst(e.x, y, e.z, 28, 9.5, '#ffc95c');
+    w.hitstop = Math.max(w.hitstop, 0.18); w.shake = Math.max(w.shake, 0.6); w.fovKick = -8;
+    w.shards.burst(e.x, y, e.z, 32, 10, '#ffc95c');
     w.slashes.spawn(e.x, e.z, 0, 'parry', '#ffc95c');
-    hud.set({ callout: { text: 'PARRY!', color: '#ffc95c', id: ++w.calloutId } });
+    hud.set({ callout: { text: 'PARRY! RIPOSTE!', color: '#ffc95c', id: ++w.calloutId } });
     return;
   }
   if (e.type === 'guardBreak') {
@@ -170,10 +170,15 @@ function onHit(w: ArenaWorld, e: HitEvent) {
 
   if (e.type === 'hit') {
     const fin = e.atk === 'light3';
-    w.hitstop = Math.max(w.hitstop, e.heavy || fin ? 0.11 : 0.06);
-    w.shake = Math.max(w.shake, e.heavy || fin ? 0.6 : 0.25);
-    if (e.heavy || fin) w.fovKick = Math.min(w.fovKick, -4);
-    if (fin && a.team === 'p' && !e.severed) hud.set({ callout: { text: 'FINISHER!', color: '#ff4fd8', id: ++w.calloutId } });
+    w.hitstop = Math.max(w.hitstop, e.riposte || e.heavy || fin ? 0.13 : 0.06);
+    w.shake = Math.max(w.shake, e.riposte || e.heavy || fin ? 0.65 : 0.25);
+    if (e.riposte || e.heavy || fin) w.fovKick = Math.min(w.fovKick, -4.5);
+    if (e.riposte) {
+      w.shards.burst(v.x, y, v.z, 26, 9, '#ffc95c', e.dx, e.dz);
+      if (a.team === 'p' && !e.severed) hud.set({ callout: { text: 'RIPOSTE!', color: '#ffc95c', id: ++w.calloutId } });
+    } else if (fin && a.team === 'p' && !e.severed) {
+      hud.set({ callout: { text: 'FINISHER!', color: '#ff4fd8', id: ++w.calloutId } });
+    }
     w.shards.burst(v.x, y, v.z, e.heavy || fin ? 24 : 12, e.heavy || fin ? 8.5 : 5, v.stats.color, e.dx, e.dz);
   } else {
     if (a.team === 'p' && a.state !== 'dead') a.hp = Math.min(a.maxHp, a.hp + a.mods.healOnKill);
@@ -216,6 +221,7 @@ function playerIntent(w: ArenaWorld): Intent {
     moveZ: l > 0 ? (fz * fwd + rz * side) / l : 0,
     light: b.light > 0, heavy: b.heavy > 0, bash: b.bash > 0,
     block: keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('KeyL'),
+    parry: b.parry > 0,
     dodge: b.dodge > 0,
   };
 }
@@ -231,6 +237,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
   if (pressed('KeyK') || pressed('Mouse2')) b.heavy = 0.22;
   if (pressed('KeyF')) b.bash = 0.22;
   if (pressed('Space')) b.dodge = 0.16;
+  if (pressed('ShiftLeft') || pressed('ShiftRight') || pressed('KeyL')) b.parry = 0.16;
 
   if (w.phase === 'intro' && w.phaseT > 1.6) {
     w.phase = 'fight'; w.phaseT = 0; hud.set({ phase: 'fight' });
@@ -280,7 +287,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     let intent: Intent = NO_INTENT;
     if (fighting) {
       if (f === player) intent = playerIntent(w);
-      else if (target) intent = aiIntent(f, target, dt);
+      else if (target) intent = aiIntent(f, target, dt, liveFoes);
     }
     const prev = f.state;
     const prevQueued = f.queuedAtk;
@@ -288,6 +295,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
 
     if (f === player) {
       if (f.state !== 'idle' && prev === 'idle') { b.light = 0; b.heavy = 0; b.bash = 0; b.dodge = 0; }
+      if (f.parryHold > 0 || f.blocking) b.parry = 0;
       if (f.queuedAtk && f.queuedAtk !== prevQueued) { b.light = 0; b.heavy = 0; b.bash = 0; }
     }
 
@@ -316,7 +324,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     }
   }
   b.light = Math.max(0, b.light - dt); b.heavy = Math.max(0, b.heavy - dt);
-  b.bash = Math.max(0, b.bash - dt); b.dodge = Math.max(0, b.dodge - dt);
+  b.bash = Math.max(0, b.bash - dt); b.dodge = Math.max(0, b.dodge - dt); b.parry = Math.max(0, b.parry - dt);
 
   if (fighting) {
     const foesLeft = w.fighters.some((f) => f.team === 'e' && f.state !== 'dead');
@@ -346,12 +354,14 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     h.group.rotation.y = f.yaw;
     const p = h.pose;
     const at = f.atk ? ATTACKS[f.atk] : null;
-    let progress = 0, tele = 0;
-    if (at && f.state === 'windup') {
-      const raw = at.windup * f.stats.windupMul * stDef.windupMul;
-      const wt = f.team === 'e' ? Math.max(0.4, raw) : raw;
+    let progress = 0, tele = 0, parryFlash = 0;
+    if (at && f.atk && f.state === 'windup') {
+      const wt = windupOf(f, f.atk);
       progress = Math.min(1, f.t / wt);
       tele = f.team === 'e' ? 0.35 + progress * 0.65 : 0;
+      if (f.team === 'e' && f.atk !== 'bash' && wt - f.t <= 0.30) {
+        parryFlash = Math.min(1, Math.max(0, 1 - (wt - f.t) / 0.30));
+      }
     } else if (at && f.state === 'strike') {
       progress = Math.min(1, f.t / at.strike);
     } else if (at && f.state === 'recover') {
@@ -365,6 +375,9 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     p.atk = f.atk;
     p.progress = progress;
     p.telegraph = tele;
+    p.parryFlash = parryFlash;
+    p.parryReady = f.blocking && f.blockT <= parryWindowOf(f) ? 1 : 0;
+    p.riposte = f.riposte > 0 || f.riposteActive ? 1 : 0;
     p.block += ((f.blocking ? 1 : 0) - p.block) * 0.35;
     p.hurt = f.state === 'stagger' ? Math.max(0, 1 - f.t / 0.25) : Math.max(0, p.hurt - 0.12);
     p.stance = 1;

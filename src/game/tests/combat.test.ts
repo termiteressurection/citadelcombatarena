@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACKS, KINDS, NO_INTENT, aiIntent, defaultMods, makeFighter, pickTargetZone, resolveStrike, startAttack, stepFighter, PARRY_WINDOW } from '../arena/combat';
-import { STYLE_IDS, styleOf } from '../arena/styles';
+import { ATTACKS, KINDS, NO_INTENT, PARRY_WINDOW, RIPOSTE_DMG_MUL, aiIntent, defaultMods, makeFighter, parryWindowOf, pickTargetZone, resolveStrike, startAttack, stepFighter } from '../arena/combat';
+import { STYLE_IDS, moveOf, styleOf } from '../arena/styles';
 
 const duel = () => {
   const p = makeFighter(0, 'player', 0, 0);
@@ -328,5 +328,120 @@ describe('combat rules', () => {
     expect(dim.limbs.armL.severed).toBe(true);
     dim.state = 'idle';
     expect(startAttack(dim, 'light')).toBe(false);
+  });
+
+  it('distinct weapon movesets: spear heavy thrusts far forward, hammer light sweeps wide flanks', () => {
+    expect(moveOf('hoplomachus', 'heavy').motion).toBe('thrust');
+    expect(moveOf('executioner', 'light').motion).toBe('sweep');
+    expect(moveOf('dimachaerus', 'light3').motion).toBe('twinCross');
+    expect(moveOf('retiarius', 'heavy').motion).toBe('netThrow');
+
+    // Hoplomachus spear heavy reaches 4.7m straight ahead, misses wide flank
+    const hop = makeFighter(0, 'player', 0, 0, defaultMods(), 'hoplomachus');
+    const farFront = makeFighter(1, 'brute', 0, 4.7, defaultMods(), 'murmillo');
+    const sideFlank = makeFighter(2, 'brute', 2.6, 1.5, defaultMods(), 'murmillo'); // ~60 deg off-axis (> PI/5.5)
+    hop.atk = 'heavy';
+    const evHop = resolveStrike(hop, [farFront, sideFlank]);
+    expect(evHop.map((e) => e.victim)).toEqual([1]);
+
+    // Executioner wide sweep clips broad off-axis flank target (~60 deg)
+    const exe = makeFighter(3, 'player', 0, 0, defaultMods(), 'executioner');
+    const sweptFlank = makeFighter(4, 'brute', 2.1, 1.2, defaultMods(), 'murmillo');
+    exe.atk = 'light';
+    const evExe = resolveStrike(exe, [sweptFlank]);
+    expect(evExe).toHaveLength(1);
+    expect(evExe[0].type).toBe('hit');
+  });
+
+  it('parry cancels recover/early windup, deflects Executioner heavy, and empowers 1.65x riposte', () => {
+    const p = makeFighter(0, 'player', 0, 0, defaultMods(), 'hoplomachus');
+    const exe = makeFighter(1, 'brute', 0, 2.2, defaultMods(), 'executioner');
+    p.yaw = 0; exe.yaw = Math.PI;
+    exe.hp = exe.maxHp = 500;
+
+    // 1. Recovery cancel into sustained tap-parry
+    startAttack(p, 'light');
+    run(p, 0.34, exe);
+    expect(p.state).toBe('recover');
+    stepFighter(p, { ...NO_INTENT, parry: true }, 1 / 60, exe);
+    expect(p.state).toBe('idle');
+    expect(p.blocking).toBe(true);
+    // Tap-parry sustains across subsequent NO_INTENT frames within parry window
+    run(p, 0.14, exe, NO_INTENT);
+    expect(p.blocking).toBe(true);
+    expect(p.blockT).toBeLessThanOrEqual(parryWindowOf(p));
+
+    // 2. Timed parry deflects Executioner heavy (even though held block breaks) & grants riposte
+    exe.atk = 'heavy';
+    const beforeExeStam = exe.stamina;
+    const parryEv = resolveStrike(exe, [p]);
+    expect(parryEv[0].type).toBe('parry');
+    expect(exe.state).toBe('stagger');
+    expect(exe.stagger).toBeGreaterThanOrEqual(1.3);
+    expect(exe.stamina).toBeLessThan(beforeExeStam);
+    expect(p.riposte).toBeGreaterThan(1.0);
+
+    // 3. Riposte deals 1.65x amplified damage
+    exe.state = 'idle'; exe.iframes = 0;
+    const hpBefore = exe.hp;
+    startAttack(p, 'light');
+    expect(p.riposteActive).toBe(true);
+    const ripEv = resolveStrike(p, [exe]);
+    expect(ripEv[0].riposte).toBe(true);
+    expect(hpBefore - exe.hp).toBeCloseTo(12 * styleOf('hoplomachus').dmgMul * RIPOSTE_DMG_MUL, 4);
+
+    // 4. Bash still guard-breaks a parrying defender
+    stepFighter(p, { ...NO_INTENT, parry: true }, 1 / 60, exe);
+    exe.atk = 'bash';
+    const bashEv = resolveStrike(exe, [p]);
+    expect(bashEv[0].type).toBe('guardBreak');
+  });
+
+  it('early windup feint-cancels cleanly into parry', () => {
+    const { p, e } = duel();
+    startAttack(p, 'heavy');
+    stepFighter(p, NO_INTENT, 0.05, e);
+    expect(p.state).toBe('windup');
+    stepFighter(p, { ...NO_INTENT, parry: true }, 1 / 60, e);
+    expect(p.state).toBe('idle');
+    expect(p.blocking).toBe(true);
+    expect(p.parryHold).toBeGreaterThan(0.15);
+  });
+
+  it('revamped tactical AI dodges player windups, punishes blocking, and flanks cleanly', () => {
+    const p = makeFighter(0, 'player', 0, 0, defaultMods(), 'murmillo');
+    const e1 = makeFighter(1, 'skirmisher', 0, 2.5, defaultMods(), 'dimachaerus');
+    const e2 = makeFighter(2, 'skirmisher', 0.5, 2.5, defaultMods(), 'retiarius');
+    e1.yaw = Math.PI; e2.yaw = Math.PI;
+
+    // 1. Agile AI dodges incoming player heavies reliably across multiple encounters
+    let dodged = false;
+    for (let trial = 0; trial < 20 && !dodged; trial++) {
+      e1.state = 'idle'; e1.stamina = e1.maxStamina; e1.ai.reactedAtk = false; e1.ai.reactCd = 0;
+      p.state = 'windup'; p.atk = 'heavy'; p.t = 0.05;
+      const it = aiIntent(e1, p, 1 / 60, [e1]);
+      if (it.dodge) dodged = true;
+    }
+    expect(dodged).toBe(true);
+
+    // 2. AI breaks persistent turtle guard via bash / guardBreak
+    e1.state = 'idle'; e1.stamina = e1.maxStamina; e1.x = 0; e1.z = 2.0;
+    p.state = 'idle'; p.blocking = true;
+    let antiTurtleUsed = false;
+    for (let i = 0; i < 90 && !antiTurtleUsed; i++) {
+      const it = aiIntent(e1, p, 1 / 60);
+      if (it.bash || it.heavy) antiTurtleUsed = true;
+    }
+    expect(antiTurtleUsed).toBe(true);
+
+    // 3. 2v1 flanking allies compute finite steering without NaN
+    p.blocking = false;
+    for (let i = 0; i < 120; i++) {
+      const it1 = aiIntent(e1, p, 1 / 60, [e1, e2]);
+      const it2 = aiIntent(e2, p, 1 / 60, [e1, e2]);
+      stepFighter(e1, it1, 1 / 60, p);
+      stepFighter(e2, it2, 1 / 60, p);
+      expect(Number.isFinite(e1.x + e1.z + e2.x + e2.z)).toBe(true);
+    }
   });
 });
