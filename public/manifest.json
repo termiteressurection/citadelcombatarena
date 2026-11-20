@@ -1,0 +1,17 @@
+{
+  "name": "∑NGN∑",
+  "short_name": "∑NGN∑",
+  "description": "A high-fidelity digital sanctuary and Aether portal.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "pwa-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

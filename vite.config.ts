@@ -1,0 +1,30 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import path from 'path';
+
+function manualChunks(id: string) {
+  if (id.includes('node_modules/three') || id.includes('node_modules/@react-three/fiber')) {
+    return 'three-runtime';
+  }
+}
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(import.meta.dirname, './src'),
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 1200,
+    target: 'safari17',
+    minify: 'esbuild',
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        manualChunks,
+      },
+    },
+  },
+});
