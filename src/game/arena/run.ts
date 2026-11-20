@@ -1,4 +1,5 @@
 import type { Kind } from './combat';
+import type { StyleId } from './styles';
 
 /** The championship ladder. The last bout is the Champion. */
 export const LADDER: Kind[][] = [
@@ -9,6 +10,18 @@ export const LADDER: Kind[][] = [
   ['champion'],
 ];
 export const rosterFor = (bout: number): Kind[] => LADDER[Math.min(LADDER.length, Math.max(1, bout)) - 1];
+
+export interface BoutEnemy { kind: Kind; style: StyleId }
+export const BOUT_ROSTERS: BoutEnemy[][] = [
+  [{ kind: 'skirmisher', style: 'dimachaerus' }],
+  [{ kind: 'skirmisher', style: 'retiarius' }, { kind: 'skirmisher', style: 'hoplomachus' }],
+  [{ kind: 'brute', style: 'executioner' }],
+  [{ kind: 'brute', style: 'murmillo' }, { kind: 'skirmisher', style: 'dimachaerus' }],
+  [{ kind: 'champion', style: 'hoplomachus' }],
+];
+export const boutRosterFor = (bout: number): BoutEnemy[] =>
+  BOUT_ROSTERS[Math.min(BOUT_ROSTERS.length, Math.max(1, bout)) - 1];
+
 export const isFinalBout = (bout: number) => bout >= LADDER.length;
 export const BOUT_HEAL = 0.3;
 export const gloryForBout = (bout: number, mul: number) => Math.round(10 * bout * mul);

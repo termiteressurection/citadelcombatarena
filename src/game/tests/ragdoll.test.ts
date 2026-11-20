@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { LimbKey } from '../arena/combat';
 import { createArenaWorld, initPhysics } from '../arena/physics';
-import { PIECE_SHATTER_AT, Ragdoll, RAGDOLL_SHATTER_AT, SeveredPiece } from '../arena/ragdoll';
+import { PIECE_SHATTER_AT, Ragdoll, RAGDOLL_SHATTER_AT, SeveredPiece, type DebrisKind } from '../arena/ragdoll';
+import { STYLE_IDS } from '../arena/styles';
 
 beforeAll(async () => { await initPhysics(); });
 
@@ -68,6 +69,30 @@ describe('ragdoll stability', () => {
       expect(piece.slept).toBe(true);
       piece.dispose();
       if (!rag.shattered) rag.dispose();
+    }
+    expect(world.bodies.len()).toBe(0);
+  });
+
+  it('launches 40 mixed debris pieces (limbs, armor, weapons across all 5 styles) cleanly', () => {
+    const world = createArenaWorld();
+    const kinds: DebrisKind[] = ['head', 'armL', 'armR', 'legL', 'legR', 'helm', 'pauldron', 'shield', 'weapon'];
+    for (let k = 0; k < 40; k++) {
+      const a = (k / 40) * Math.PI * 2;
+      const piece = new SeveredPiece(world, {
+        kind: kinds[k % kinds.length],
+        style: STYLE_IDS[k % STYLE_IDS.length],
+        x: Math.cos(a) * 3, z: Math.sin(a) * 3, yaw: a,
+        hitX: Math.cos(a), hitZ: Math.sin(a), hitSpeed: 13, color: '#ffc95c',
+      });
+      let done = false;
+      for (let i = 0; i < 60 * 9 && !done; i++) {
+        world.step();
+        expect(piece.isFinite()).toBe(true);
+        done = piece.tick(1 / 60);
+      }
+      expect(done).toBe(true);
+      expect(piece.slept).toBe(true);
+      piece.dispose();
     }
     expect(world.bodies.len()).toBe(0);
   });

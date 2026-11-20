@@ -1,5 +1,6 @@
 import { RAPIER, RAGDOLL_GROUPS } from './physics';
 import type { LimbKey } from './combat';
+import { styleOf, type ArmorKey, type StyleId } from './styles';
 
 export type Shape = 'capsule' | 'box' | 'ball';
 export interface PartDef { name: string; shape: Shape; size: number[]; pos: [number, number, number] }
@@ -133,28 +134,36 @@ export class Ragdoll {
   }
 }
 
+export type DebrisKind = LimbKey | ArmorKey | 'weapon';
+
 export interface SeveredOpts {
-  kind: LimbKey;
+  kind: DebrisKind;
+  style?: StyleId;
   x: number; z: number; yaw: number;
   hitX: number; hitZ: number; hitSpeed: number;
   color: string;
 }
 
-const PIECE_OFFSETS: Record<LimbKey, [number, number, number]> = {
+const PIECE_OFFSETS: Record<DebrisKind, [number, number, number]> = {
   head: [0, 1.88, 0],
   torso: [0, 1.35, 0],
   armL: [0.26, 1.35, 0],
   armR: [-0.26, 1.35, 0],
   legL: [0.11, 0.28, 0],
   legR: [-0.11, 0.28, 0],
+  helm: [0, 1.95, 0],
+  pauldron: [0.25, 1.55, 0],
+  shield: [0.32, 1.25, 0.12],
+  weapon: [-0.28, 1.15, 0.25],
 };
 
 let NEXT_PIECE_ID = 1;
 
-/** A severed stick-limb (and dropped sword/shield) tumbling on the arena sand. */
+/** A severed stick-limb, shattered armor piece, or dropped weapon tumbling on the arena sand. */
 export class SeveredPiece {
   readonly id = NEXT_PIECE_ID++;
-  readonly kind: LimbKey;
+  readonly kind: DebrisKind;
+  readonly style: StyleId;
   readonly color: string;
   readonly body: RAPIER.RigidBody;
   readonly weaponBody?: RAPIER.RigidBody;
@@ -164,7 +173,9 @@ export class SeveredPiece {
 
   constructor(private world: RAPIER.World, o: SeveredOpts) {
     this.kind = o.kind;
+    this.style = o.style ?? 'murmillo';
     this.color = o.color;
+    const st = styleOf(this.style);
     const q = new RAPIER.Quaternion(0, Math.sin(o.yaw / 2), 0, Math.cos(o.yaw / 2));
     const cos = Math.cos(o.yaw), sin = Math.sin(o.yaw);
     const [lx, ly, lz] = PIECE_OFFSETS[o.kind];
@@ -177,16 +188,23 @@ export class SeveredPiece {
     );
     const col = o.kind === 'head'
       ? RAPIER.ColliderDesc.ball(0.15)
-      : RAPIER.ColliderDesc.capsule(o.kind === 'armL' || o.kind === 'armR' ? 0.22 : 0.18, 0.055);
+      : o.kind === 'helm' || o.kind === 'pauldron'
+        ? RAPIER.ColliderDesc.cuboid(0.13, 0.13, 0.13)
+        : o.kind === 'shield'
+          ? RAPIER.ColliderDesc.cylinder(0.04, 0.28)
+          : o.kind === 'weapon'
+            ? RAPIER.ColliderDesc.cuboid(0.05, 0.5, 0.05)
+            : RAPIER.ColliderDesc.capsule(o.kind === 'armL' || o.kind === 'armR' ? 0.22 : 0.18, 0.055);
     world.createCollider(col.setFriction(0.85).setRestitution(0.22).setCollisionGroups(RAGDOLL_GROUPS), this.body);
 
-    const sideSign = o.kind === 'armL' || o.kind === 'legL' ? 1 : -1;
+    const sideSign = o.kind === 'armL' || o.kind === 'legL' || o.kind === 'pauldron' || o.kind === 'shield' ? 1 : -1;
     const sideX = cos * sideSign * 2.2;
     const sideZ = -sin * sideSign * 2.2;
     const sp = Math.min(18, o.hitSpeed * 0.75);
+    const upY = o.kind === 'head' ? 7.5 : o.kind === 'helm' ? 7.2 : o.kind === 'pauldron' ? 5.5 : o.kind === 'shield' ? 4.8 : o.kind === 'weapon' ? 4.2 : 4.5;
     this.body.setLinvel({
       x: o.hitX * sp + sideX,
-      y: o.kind === 'head' ? 7.5 : 4.5,
+      y: upY,
       z: o.hitZ * sp + sideZ,
     }, true);
     this.body.setAngvel({
@@ -195,15 +213,17 @@ export class SeveredPiece {
       z: Math.max(-12, Math.min(12, o.hitX * 7)),
     }, true);
 
-    if (o.kind === 'armL' || o.kind === 'armR') {
-      const [wlx, wly, wlz] = o.kind === 'armL' ? [0.34, 1.25, 0.1] : [-0.28, 1.05, 0.25];
+    const dropLeft = o.kind === 'armL' && (st.hasShield || st.dualWield);
+    const dropRight = o.kind === 'armR';
+    if (dropLeft || dropRight) {
+      const [wlx, wly, wlz] = dropLeft ? [0.34, 1.25, 0.1] : [-0.28, 1.05, 0.25];
       const wwx = o.x + wlx * cos + wlz * sin;
       const wwz = o.z - wlx * sin + wlz * cos;
       const wb = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic().setTranslation(wwx, wly, wwz).setRotation(q)
           .setLinearDamping(0.3).setAngularDamping(1.5).setCcdEnabled(true),
       );
-      const wcol = o.kind === 'armL'
+      const wcol = dropLeft && st.hasShield
         ? RAPIER.ColliderDesc.cylinder(0.04, 0.24)
         : RAPIER.ColliderDesc.cuboid(0.04, 0.44, 0.04);
       world.createCollider(wcol.setFriction(0.8).setRestitution(0.25).setCollisionGroups(RAGDOLL_GROUPS), wb);

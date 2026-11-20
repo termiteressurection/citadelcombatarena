@@ -13,6 +13,7 @@ import { BASIN, BOUNDS, COLUMNS, PLAYER_START, SOLIDS, nearestStation } from './
 import { clampBounds, isFree, resolveCircles } from './world/colliders';
 import { keys, pressed } from './input';
 import { lookColor } from './arena/run';
+import { STYLE_IDS, styleOf, type StyleId } from './arena/styles';
 import { useGame } from './store';
 
 const PLAYER_R = 0.55;
@@ -105,6 +106,7 @@ function Player({ playerPos }: { playerPos: PosRef }) {
   const g = useRef<GladiatorHandle>(null!);
   const camera = useThree((s) => s.camera);
   const look = useGame((s) => s.look);
+  const style = useGame((s) => s.style);
   const st = useRef({
     x: PLAYER_START.x, z: PLAYER_START.z, vx: 0, vz: 0, face: Math.PI, yaw: 0, pitch: 0,
     cam: new THREE.Vector3(PLAYER_START.x, EYE_Y + CAMERA_SOCKET_HEIGHT, PLAYER_START.z + CAMERA_SOCKET_DISTANCE),
@@ -177,7 +179,7 @@ function Player({ playerPos }: { playerPos: PosRef }) {
     if (!frozen && near && (pressed('Enter') || pressed('Space'))) game.openPanel(near.id);
   });
 
-  return <Gladiator key={look} ref={g} color={lookColor(look)} />;
+  return <Gladiator key={`${look}-${style}`} ref={g} style={style} color={lookColor(look)} scale={styleOf(style).scale} />;
 }
 
 const NPC_COLORS = [ACCENTS.coral, ACCENTS.lime, ACCENTS.magenta, ACCENTS.azure, ACCENTS.rose, ACCENTS.emerald, ACCENTS.violet, ACCENTS.gold];
@@ -191,7 +193,7 @@ function pickPoint(): { x: number; z: number } {
   return { ...PLAYER_START };
 }
 
-function Npc({ color, seed }: { color: string; seed: number }) {
+function Npc({ color, seed, style }: { color: string; seed: number; style: StyleId }) {
   const g = useRef<GladiatorHandle>(null!);
   const st = useRef({ ...pickPoint(), yaw: seed, target: pickPoint(), wait: seed % 3, started: false });
   useFrame((_, delta) => {
@@ -219,7 +221,7 @@ function Npc({ color, seed }: { color: string; seed: number }) {
     g.current.pose.stance = 0;
     g.current.pose.localVz += (moving - g.current.pose.localVz) * (1 - Math.exp(-10 * dt));
   });
-  return <Gladiator ref={g} color={color} accent="#e9e6ff" scale={0.97 + (seed % 3) * 0.04} />;
+  return <Gladiator ref={g} style={style} color={color} accent="#e9e6ff" scale={styleOf(style).scale} />;
 }
 
 export function Ludus() {
@@ -236,7 +238,7 @@ export function Ludus() {
       <Parapet />
       <StaticBatch><Colonnade playerPos={playerPos} /></StaticBatch>
       <Stations />
-      {NPC_COLORS.map((c, i) => <Npc key={i} color={c.hex} seed={i + 1} />)}
+      {NPC_COLORS.map((c, i) => <Npc key={i} color={c.hex} seed={i + 1} style={STYLE_IDS[i % STYLE_IDS.length]} />)}
       <Player playerPos={playerPos} />
     </>
   );

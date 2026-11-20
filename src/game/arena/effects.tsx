@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Atk } from './combat';
+import type { StyleId } from './styles';
 
 interface Shard { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number; color: THREE.Color }
 
@@ -61,6 +62,7 @@ interface SlashSlot {
   z: number;
   yaw: number;
   kind: SlashKind;
+  style: StyleId;
   color: THREE.Color;
   life: number;
   max: number;
@@ -70,10 +72,10 @@ interface SlashSlot {
 export class SlashPool {
   static readonly CAP = 10;
   readonly slots: SlashSlot[] = Array.from({ length: SlashPool.CAP }, () => ({
-    active: false, x: 0, y: 1.25, z: 0, yaw: 0, kind: 'light', color: new THREE.Color('#ffffff'), life: 0, max: 0.18,
+    active: false, x: 0, y: 1.25, z: 0, yaw: 0, kind: 'light', style: 'murmillo', color: new THREE.Color('#ffffff'), life: 0, max: 0.18,
   }));
 
-  spawn(x: number, z: number, yaw: number, kind: SlashKind, color: string): void {
+  spawn(x: number, z: number, yaw: number, kind: SlashKind, color: string, style: StyleId = 'murmillo'): void {
     let slot = this.slots.find((s) => !s.active);
     if (!slot) {
       slot = this.slots.reduce((a, b) => (a.life / a.max > b.life / b.max ? a : b));
@@ -84,6 +86,7 @@ export class SlashPool {
     slot.z = z;
     slot.yaw = yaw;
     slot.kind = kind;
+    slot.style = style;
     slot.color.set(color);
     slot.life = 0;
     slot.max = kind === 'heavy' || kind === 'light3' ? 0.24 : kind === 'parry' ? 0.28 : 0.18;
@@ -136,29 +139,34 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
       mat.color.copy(s.color);
       mat.opacity = (1 - p) * (1 - p) * 0.92;
 
-      if (s.kind === 'bash' || s.kind === 'parry') {
+      if (s.kind === 'bash' || s.kind === 'parry' || (s.style === 'retiarius' && s.kind === 'heavy')) {
         arc.visible = false;
         ring.visible = true;
-        const sc = s.kind === 'parry' ? 0.7 + p * 2.6 : 0.6 + p * 1.9;
+        const sc = s.kind === 'parry' ? 0.7 + p * 2.6 : s.style === 'retiarius' && s.kind === 'heavy' ? 0.9 + p * 3.8 : 0.6 + p * 1.9;
         ring.scale.setScalar(sc);
       } else {
         arc.visible = true;
         ring.visible = false;
         arc.position.set(0, 0, 0);
+        const stScale = s.style === 'executioner' ? 1.38 : s.style === 'dimachaerus' ? 0.95 : 1.0;
+        const isThrust = (s.style === 'hoplomachus' || s.style === 'retiarius') && s.kind !== 'heavy';
         if (s.kind === 'light') {
           arc.rotation.set(0, THREE.MathUtils.lerp(-0.55, 0.55, p), 0.24);
-          arc.scale.setScalar(1.0);
+          if (isThrust) arc.scale.set(0.65, 1, 1.45);
+          else arc.scale.setScalar(1.0 * stScale);
         } else if (s.kind === 'light2') {
           arc.rotation.set(0, THREE.MathUtils.lerp(0.55, -0.55, p), -0.24);
-          arc.scale.setScalar(1.04);
+          if (isThrust) arc.scale.set(0.65, 1, 1.5);
+          else arc.scale.setScalar(1.04 * stScale);
         } else if (s.kind === 'light3') {
           arc.rotation.set(0, THREE.MathUtils.lerp(-0.65, 0.7, p), 0.48);
-          arc.scale.setScalar(1.22);
+          if (isThrust) arc.scale.set(0.7, 1, 1.6);
+          else arc.scale.setScalar(1.22 * stScale);
         } else {
           // heavy vertical overhead cleave
           arc.rotation.set(THREE.MathUtils.lerp(-0.45, 0.35, p), 0, Math.PI / 2);
           arc.position.set(0, 0.15, 0);
-          arc.scale.setScalar(1.18);
+          arc.scale.setScalar(1.18 * stScale);
         }
       }
     }

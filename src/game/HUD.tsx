@@ -5,6 +5,7 @@ import { useArena, type LimbHud } from './arena/arenaStore';
 import { boonById } from './arena/boons';
 import { type LimbKey } from './arena/combat';
 import { LADDER, LOOKS } from './arena/run';
+import { STYLE_IDS, STYLES } from './arena/styles';
 
 function Fps() {
   const el = useRef<HTMLDivElement>(null);
@@ -25,19 +26,57 @@ function Fps() {
 }
 
 function StationPanel() {
-  const { panel, setScene, glory, fallen, unlocks, look, champions, buyLook, equipLook } = useGame();
+  const { panel, setScene, glory, fallen, unlocks, look, style, champions, buyLook, equipLook, equipStyle } = useGame();
   if (!panel) return null;
   const s = STATIONS.find((x) => x.id === panel)!;
+  const curStyle = STYLES[style];
+  const cycleStyle = () => equipStyle(STYLE_IDS[(STYLE_IDS.indexOf(style) + 1) % STYLE_IDS.length]);
   const body: Record<string, JSX.Element> = {
-    gate: <><p>{LADDER.length} bouts to the championship. Draw one Fate between each. Fall once and the run is over.</p><button className="clickable btn" onClick={() => { useArena.getState().startRun(); setScene('arena'); }}>WALK THROUGH</button></>,
-    armory: <>
-      <p>Choose your crest. Looks only. No look ever hits harder.</p>
-      <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
-        {LOOKS.filter((l) => unlocks.includes(l.id)).map((l) => (
-          <button key={l.id} className="clickable btn" style={{ color: l.color, borderColor: l.color, opacity: look === l.id ? 1 : 0.6 }} onClick={() => equipLook(l.id)}>{look === l.id ? '▶ ' : ''}{l.name}</button>
-        ))}
+    gate: (
+      <>
+        <p>{LADDER.length} bouts to the championship. Draw one Fate between each. Fall once and the run is over.</p>
+        <p style={{ color: curStyle.color }}>EQUIPPED: {curStyle.name} — {curStyle.tagline}</p>
+        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button className="clickable btn" onClick={() => { useArena.getState().startRun(); setScene('arena'); }}>WALK THROUGH</button>
+          <button className="clickable btn" style={{ color: curStyle.color, borderColor: curStyle.color }} onClick={cycleStyle}>SWAP STYLE</button>
+        </div>
+      </>
+    ),
+    armory: (
+      <div style={{ display: 'flex', gap: 28, justifyContent: 'center', alignItems: 'flex-start', flexWrap: 'wrap', maxWidth: 820 }}>
+        <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
+          <p style={{ fontSize: 12, opacity: 0.75 }}>FIGHTING STYLE</p>
+          {STYLE_IDS.map((id) => {
+            const st = STYLES[id];
+            const eq = style === id;
+            return (
+              <button
+                key={id}
+                className="clickable btn"
+                style={{ color: st.color, borderColor: st.color, opacity: eq ? 1 : 0.65, width: 320, padding: '8px 14px', fontSize: 13 }}
+                onClick={() => equipStyle(id)}
+              >
+                <div>{eq ? '▶ ' : ''}{st.name}</div>
+                <div style={{ fontSize: 10, letterSpacing: '.06em', opacity: 0.85, color: '#e9e6ff', marginTop: 2 }}>{st.tagline}</div>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
+          <p style={{ fontSize: 12, opacity: 0.75 }}>CREST COLOR (COSMETIC)</p>
+          {LOOKS.filter((l) => unlocks.includes(l.id)).map((l) => (
+            <button
+              key={l.id}
+              className="clickable btn"
+              style={{ color: l.color, borderColor: l.color, opacity: look === l.id ? 1 : 0.6, width: 220, padding: '8px 14px', fontSize: 13 }}
+              onClick={() => equipLook(l.id)}
+            >
+              {look === l.id ? '▶ ' : ''}{l.name}
+            </button>
+          ))}
+        </div>
       </div>
-    </>,
+    ),
     shrine: <>
       <p>Glory: {glory}</p>
       <p>Offerings unlock new crests. Never raw power.</p>
@@ -208,7 +247,7 @@ function ArenaHud() {
         {a.enemies.filter((e) => e.hp > 0).map((e) => (
           <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'grid', gap: 4, justifyItems: 'center' }}>
-              <div style={{ letterSpacing: '.3em', fontSize: 13, color: '#ff6b6b' }}>{e.name}</div>
+              <div style={{ letterSpacing: '.26em', fontSize: 13, color: '#ff6b6b' }}>{e.name} · {e.styleName}</div>
               <Bar v={e.hp} max={e.max} color="#ff6b6b" w={210} />
             </div>
             <LimbDoll limbs={e.limbs} size={44} />

@@ -6,15 +6,16 @@ import { SynthwaveHorizon } from './art/SynthwaveHorizon';
 import Starfield from './art/Starfield';
 import { DoricColumn } from './art/ClassicalColumns';
 import {
-  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, makeFighter, resolveStrike, stepFighter,
-  type Fighter, type HitEvent, type Intent, type Kind, type LimbKey,
+  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, defaultMods, makeFighter, resolveStrike, stepFighter,
+  type Fighter, type HitEvent, type Intent, type LimbKey,
 } from './arena/combat';
 import { ARENA_RADIUS, createArenaWorld, initPhysics, RAPIER } from './arena/physics';
 import { PARTS, Ragdoll, SeveredPiece } from './arena/ragdoll';
 import { DashGhosts, GhostPool, ShardPool, SlashPool, SlashRibbons } from './arena/effects';
 import { fullLimbHud, toLimbHud, useArena, type LimbHud } from './arena/arenaStore';
 import { drawBoons, modsFor } from './arena/boons';
-import { CHAMPION_BONUS, carryHp, gloryForBout, isFinalBout, lookColor, rosterFor } from './arena/run';
+import { CHAMPION_BONUS, boutRosterFor, carryHp, gloryForBout, isFinalBout, lookColor, type BoutEnemy } from './arena/run';
+import { STYLE_IDS, styleOf, type ArmorKey, type StyleId } from './arena/styles';
 import { keys, pressed } from './input';
 import { useGame } from './store';
 
@@ -55,13 +56,23 @@ interface ArenaWorld {
   settled: boolean;
 }
 
-function newWorld(bout: number, roster: Kind[], boons: string[], carry: number, carryMax: number, look: string): ArenaWorld {
+function resolvePlayerStyle(saved: StyleId): StyleId {
+  if (typeof location === 'undefined') return saved;
+  const p = new URLSearchParams(location.search).get('style');
+  return p && (STYLE_IDS as readonly string[]).includes(p) ? (p as StyleId) : saved;
+}
+
+function newWorld(bout: number, roster: BoutEnemy[], boons: string[], carry: number, carryMax: number, look: string, playerStyle: StyleId): ArenaWorld {
   const mods = modsFor(boons);
-  const player = makeFighter(0, 'player', 0, 8, mods);
+  const player = makeFighter(0, 'player', 0, 8, mods, playerStyle);
   player.stats = { ...player.stats, color: lookColor(look) };
   if (carry > 0) player.hp = Math.min(player.maxHp, carry + Math.max(0, player.maxHp - carryMax));
   const fighters = [player];
-  roster.forEach((k, i) => fighters.push(makeFighter(i + 1, k, (i - (roster.length - 1) / 2) * 4, -8)));
+  roster.forEach((item, i) => {
+    const e = makeFighter(i + 1, item.kind, (i - (roster.length - 1) / 2) * 4, -8, defaultMods(), item.style);
+    e.stats = { ...e.stats, color: styleOf(item.style).color };
+    fighters.push(e);
+  });
   return {
     bout, freed: false,
     phys: createArenaWorld(), fighters, ragdolls: [], debris: [],
@@ -110,10 +121,27 @@ function onHit(w: ArenaWorld, e: HitEvent) {
     return;
   }
 
+  // Shattered armor debris & Retiarius net snare
+  if (e.armorBroken) {
+    w.debris.push(new SeveredPiece(w.phys, {
+      kind: e.armorBroken, style: v.style, x: v.x, z: v.z, yaw: v.yaw,
+      hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy ? 12 : 8, color: v.stats.color,
+    }));
+    w.debrisVersion++;
+    w.shards.burst(v.x, e.armorBroken === 'helm' ? 1.9 : 1.4, v.z, 20, 8, '#ffc95c', e.dx, e.dz);
+    w.fovKick = Math.min(w.fovKick, -4);
+    const label = e.armorBroken === 'helm' ? 'HELM SHATTERED!' : e.armorBroken === 'shield' ? 'SHIELD CRACKED!' : 'ARMOR SHATTERED!';
+    hud.set({ callout: { text: label, color: '#ffc95c', id: ++w.calloutId } });
+  }
+  if (e.snared) {
+    w.shards.burst(v.x, 1.1, v.z, 18, 6.5, '#3ff0ff');
+    hud.set({ callout: { text: 'NETTED!', color: '#3ff0ff', id: ++w.calloutId } });
+  }
+
   // Severed limb debris
   if (e.severed) {
     w.debris.push(new SeveredPiece(w.phys, {
-      kind: e.severed, x: v.x, z: v.z, yaw: v.yaw,
+      kind: e.severed, style: v.style, x: v.x, z: v.z, yaw: v.yaw,
       hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy || e.decap ? 14 : 9, color: v.stats.color,
     }));
     w.debrisVersion++;
@@ -151,6 +179,13 @@ function onHit(w: ArenaWorld, e: HitEvent) {
     if (a.team === 'p' && a.state !== 'dead') a.hp = Math.min(a.maxHp, a.hp + a.mods.healOnKill);
     w.hitstop = Math.max(w.hitstop, 0.22); w.shake = Math.max(w.shake, 0.9); w.fovKick = Math.min(w.fovKick, -6);
     w.shards.burst(v.x, y, v.z, 34, 10.5, v.stats.color, e.dx, e.dz);
+    if (!v.limbs.armR.severed) {
+      w.debris.push(new SeveredPiece(w.phys, {
+        kind: 'weapon', style: v.style, x: v.x, z: v.z, yaw: v.yaw,
+        hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy ? 13 : 8, color: v.stats.color,
+      }));
+      w.debrisVersion++;
+    }
     w.ragdolls.push(new Ragdoll(w.phys, {
       x: v.x, z: v.z, yaw: v.yaw, vx: v.vx * 0.5, vz: v.vz * 0.5,
       hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy || e.atk === 'light3' ? 17 : 10, color: v.stats.color,
@@ -275,8 +310,8 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     }
 
     if (strike && f.atk) {
-      const slashColor = f.atk === 'light3' ? '#ffc95c' : f.team === 'p' ? f.stats.color : '#ff4f6d';
-      w.slashes.spawn(f.x, f.z, f.yaw, f.atk, slashColor);
+      const slashColor = f.atk === 'light3' ? '#ffc95c' : f.style === 'retiarius' && f.atk === 'heavy' ? '#3ff0ff' : f.team === 'p' ? f.stats.color : '#ff4f6d';
+      w.slashes.spawn(f.x, f.z, f.yaw, f.atk, slashColor, f.style);
       for (const e of resolveStrike(f, w.fighters)) onHit(w, e);
     }
   }
@@ -300,7 +335,9 @@ const makeLimbPose = (): LimbPose => ({
 function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
   const g = useRef<GladiatorHandle>(null!);
   const limbPose = useRef<LimbPose>(makeLimbPose());
+  const armorPose = useRef<Record<ArmorKey, boolean>>({ helm: true, pauldron: true, shield: true });
   const f = w.fighters[index];
+  const stDef = styleOf(f.style);
   useFrame(() => {
     const h = g.current;
     if (!h) return;
@@ -311,13 +348,14 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     const at = f.atk ? ATTACKS[f.atk] : null;
     let progress = 0, tele = 0;
     if (at && f.state === 'windup') {
-      const wt = at.windup * f.stats.windupMul;
+      const raw = at.windup * f.stats.windupMul * stDef.windupMul;
+      const wt = f.team === 'e' ? Math.max(0.4, raw) : raw;
       progress = Math.min(1, f.t / wt);
       tele = f.team === 'e' ? 0.35 + progress * 0.65 : 0;
     } else if (at && f.state === 'strike') {
       progress = Math.min(1, f.t / at.strike);
     } else if (at && f.state === 'recover') {
-      progress = Math.min(1, f.t / at.recover);
+      progress = Math.min(1, f.t / (at.recover * stDef.recoverMul));
     } else if (f.state === 'dodge') {
       progress = Math.min(1, f.t / DODGE_TIME);
     } else if (f.state === 'stagger') {
@@ -339,10 +377,23 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
       limbPose.current[k].severed = f.limbs[k].severed;
     }
     p.limbs = limbPose.current;
+    armorPose.current.helm = !f.armor.helm.broken;
+    armorPose.current.pauldron = !f.armor.pauldron.broken;
+    armorPose.current.shield = !f.armor.shield.broken;
+    p.armor = armorPose.current;
+    p.snared = f.snared;
     const sp = Math.hypot(f.vx, f.vz);
-    h.setMoving(f.state === 'dodge' ? 1 : Math.min(1, sp / f.stats.speed));
+    h.setMoving(f.state === 'dodge' ? 1 : Math.min(1, sp / (f.stats.speed * stDef.speedMul)));
   });
-  return <Gladiator ref={g} color={f.stats.color} accent={f.team === 'p' ? '#ffc95c' : '#e9e6ff'} scale={f.kind === 'brute' ? 1.3 : f.kind === 'champion' ? 1.15 : 1} />;
+  return (
+    <Gladiator
+      ref={g}
+      style={f.style}
+      color={f.stats.color}
+      accent={f.team === 'p' ? '#ffc95c' : '#e9e6ff'}
+      scale={f.kind === 'brute' ? 1.24 : f.kind === 'champion' ? 1.15 : stDef.scale}
+    />
+  );
 }
 
 function TargetReticle({ w }: { w: ArenaWorld }) {
@@ -408,12 +459,13 @@ function RagdollView({ w, rag }: { w: ArenaWorld; rag: Ragdoll }) {
   );
 }
 
-/** Tumbling severed limb (plus dropped sword or shield) on the arena sand. */
+/** Tumbling severed limb, shattered armor piece, or dropped weapon on the arena sand. */
 function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) {
-  const limbRef = useRef<THREE.Mesh>(null!);
+  const limbRef = useRef<THREE.Group>(null!);
   const weaponRef = useRef<THREE.Group>(null!);
   const mat = useMemo(() => new THREE.MeshBasicMaterial({ color: new THREE.Color(piece.color).lerp(new THREE.Color('#ffffff'), 0.72) }), [piece.color]);
-  const shieldMat = useMemo(() => new THREE.MeshBasicMaterial({ color: mat.color, side: THREE.DoubleSide }), [mat]);
+  const wireMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ffc95c', wireframe: true, side: THREE.DoubleSide }), []);
+  const shieldMat = useMemo(() => new THREE.MeshBasicMaterial({ color: piece.color, wireframe: true, side: THREE.DoubleSide }), [piece.color]);
 
   useFrame(() => {
     if (w.freed || piece.shattered) return;
@@ -429,18 +481,65 @@ function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) 
     }
   });
 
-  const dims: [number, number, number] = piece.kind === 'head' ? [0.08, 0.2, 0.08] : [0.09, 0.38, 0.09];
+  const renderWeapon = () => {
+    if (piece.style === 'executioner') {
+      return (
+        <group>
+          <mesh material={wireMat}><boxGeometry args={[0.055, 1.2, 0.055]} /></mesh>
+          <mesh position={[0, -0.58, 0]} material={wireMat}><boxGeometry args={[0.26, 0.22, 0.42]} /></mesh>
+        </group>
+      );
+    }
+    if (piece.style === 'retiarius') {
+      return (
+        <group>
+          <mesh material={wireMat}><boxGeometry args={[0.045, 1.4, 0.045]} /></mesh>
+          <mesh position={[0, -0.7, 0]} material={wireMat}><boxGeometry args={[0.3, 0.05, 0.05]} /></mesh>
+        </group>
+      );
+    }
+    if (piece.style === 'hoplomachus') {
+      return (
+        <group>
+          <mesh material={wireMat}><boxGeometry args={[0.045, 1.5, 0.045]} /></mesh>
+          <mesh position={[0, -0.78, 0]} rotation={[Math.PI, 0, 0]}><coneGeometry args={[0.08, 0.25, 4]} /><meshBasicMaterial color="#ffffff" /></mesh>
+        </group>
+      );
+    }
+    return <mesh><boxGeometry args={[0.055, 0.85, 0.055]} /><meshBasicMaterial color="#ffffff" /></mesh>;
+  };
+
   return (
     <group>
-      <mesh ref={limbRef} material={mat}><boxGeometry args={dims} /></mesh>
+      <group ref={limbRef}>
+        {piece.kind === 'helm' && (
+          <group>
+            <mesh material={wireMat}><boxGeometry args={[0.22, 0.24, 0.24]} /></mesh>
+            <mesh position={[0, 0.16, 0]} material={wireMat}><boxGeometry args={[0.05, 0.16, 0.3]} /></mesh>
+          </group>
+        )}
+        {piece.kind === 'pauldron' && (
+          <group>
+            <mesh material={wireMat}><icosahedronGeometry args={[0.17, 0]} /></mesh>
+            <mesh position={[0, 0.18, 0]} material={wireMat}><coneGeometry args={[0.06, 0.22, 4]} /></mesh>
+          </group>
+        )}
+        {piece.kind === 'shield' && (
+          <mesh rotation={[Math.PI / 2, 0, 0]} material={shieldMat}><ringGeometry args={[0.22, 0.34, 8]} /></mesh>
+        )}
+        {piece.kind === 'weapon' && renderWeapon()}
+        {piece.kind !== 'helm' && piece.kind !== 'pauldron' && piece.kind !== 'shield' && piece.kind !== 'weapon' && (
+          <mesh material={mat}><boxGeometry args={piece.kind === 'head' ? [0.08, 0.2, 0.08] : [0.09, 0.38, 0.09]} /></mesh>
+        )}
+      </group>
       {piece.weaponBody && piece.kind === 'armR' && (
-        <group ref={weaponRef}>
-          <mesh><boxGeometry args={[0.055, 0.85, 0.055]} /><meshBasicMaterial color="#ffffff" /></mesh>
-        </group>
+        <group ref={weaponRef}>{renderWeapon()}</group>
       )}
       {piece.weaponBody && piece.kind === 'armL' && (
         <group ref={weaponRef}>
-          <mesh rotation={[Math.PI / 2, 0, 0]} material={shieldMat}><ringGeometry args={[0.2, 0.27, 10]} /></mesh>
+          {styleOf(piece.style).dualWield
+            ? <mesh><boxGeometry args={[0.05, 0.78, 0.05]} /><meshBasicMaterial color="#ffffff" /></mesh>
+            : <mesh rotation={[Math.PI / 2, 0, 0]} material={shieldMat}><ringGeometry args={[0.2, 0.27, 10]} /></mesh>}
         </group>
       )}
     </group>
@@ -529,7 +628,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
     const playerLimbs = toLimbHud(p.limbs);
     const samePlayerLimbs = sameLimbHud(playerLimbs, hud.playerLimbs);
     const enemies = w.fighters.filter((f) => f.team === 'e').map((f) => ({
-      id: f.id, name: f.stats.name, hp: Math.ceil(f.hp), max: f.maxHp, limbs: toLimbHud(f.limbs),
+      id: f.id, name: f.stats.name, styleName: styleOf(f.style).name, hp: Math.ceil(f.hp), max: f.maxHp, limbs: toLimbHud(f.limbs),
     }));
     const sameEnemies = enemies.length === hud.enemies.length && enemies.every((e, i) =>
       e.hp === hud.enemies[i].hp && sameLimbHud(e.limbs, hud.enemies[i].limbs),
@@ -629,7 +728,8 @@ export function Arena() {
     initPhysics().then(() => {
       if (dead) return;
       const a = useArena.getState();
-      local = newWorld(bout, rosterFor(bout), a.boons, a.carryHp, a.carryMax, useGame.getState().look);
+      const gs = useGame.getState();
+      local = newWorld(bout, boutRosterFor(bout), a.boons, a.carryHp, a.carryMax, gs.look, resolvePlayerStyle(gs.style));
       a.set({
         phase: 'intro',
         hp: local.fighters[0].hp,

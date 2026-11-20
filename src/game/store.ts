@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import type { StationId } from './world/layout';
 import { LOOKS } from './arena/run';
+import { STYLE_IDS, type StyleId } from './arena/styles';
 
 export type Scene = 'ludus' | 'arena';
 export interface Fallen { name: string; bouts: number; cause: string; date: string }
-interface Save { glory: number; unlocks: string[]; fallen: Fallen[]; look: string; champions: number }
+interface Save { glory: number; unlocks: string[]; fallen: Fallen[]; look: string; style: StyleId; champions: number }
 
 const KEY = 'boneyard.save.v1';
-const blank = (): Save => ({ glory: 0, unlocks: ['cyan'], fallen: [], look: 'cyan', champions: 0 });
+const blank = (): Save => ({ glory: 0, unlocks: ['cyan'], fallen: [], look: 'cyan', style: 'murmillo', champions: 0 });
 
 export function loadSave(): Save {
   try {
@@ -17,11 +18,13 @@ export function loadSave(): Save {
     const ids = new Set(LOOKS.map((l) => l.id));
     const unlocks: string[] = Array.isArray(p.unlocks) ? p.unlocks.filter((u: unknown) => typeof u === 'string' && ids.has(u)) : [];
     if (!unlocks.includes('cyan')) unlocks.unshift('cyan');
+    const validStyles = new Set<string>(STYLE_IDS);
     return {
       glory: Number.isFinite(p.glory) ? p.glory : 0,
       unlocks,
       fallen: Array.isArray(p.fallen) ? p.fallen.slice(-50) : [],
       look: typeof p.look === 'string' && unlocks.includes(p.look) ? p.look : 'cyan',
+      style: typeof p.style === 'string' && validStyles.has(p.style) ? (p.style as StyleId) : 'murmillo',
       champions: Number.isFinite(p.champions) ? p.champions : 0,
     };
   } catch { return blank(); }
@@ -39,12 +42,13 @@ interface GameState extends Save {
   addGlory: (n: number) => void;
   buyLook: (id: string) => boolean;
   equipLook: (id: string) => void;
+  equipStyle: (id: StyleId) => void;
 }
 
 export const useGame = create<GameState>((set, get) => {
   const save = () => {
-    const { glory, unlocks, fallen, look, champions } = get();
-    try { localStorage.setItem(KEY, JSON.stringify({ glory, unlocks, fallen, look, champions })); } catch { /* storage unavailable */ }
+    const { glory, unlocks, fallen, look, style, champions } = get();
+    try { localStorage.setItem(KEY, JSON.stringify({ glory, unlocks, fallen, look, style, champions })); } catch { /* storage unavailable */ }
   };
   return {
     ...loadSave(),
@@ -66,5 +70,6 @@ export const useGame = create<GameState>((set, get) => {
       return true;
     },
     equipLook: (id) => { if (get().unlocks.includes(id)) { set({ look: id }); save(); } },
+    equipStyle: (id) => { set({ style: id }); save(); },
   };
 });

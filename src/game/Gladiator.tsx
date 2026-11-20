@@ -2,6 +2,7 @@ import { forwardRef, useRef, useImperativeHandle, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Atk, LimbKey, State } from './arena/combat';
+import type { ArmorKey, StyleId } from './arena/styles';
 
 export type LimbPose = Record<LimbKey, { ratio: number; severed: boolean }>;
 
@@ -25,6 +26,10 @@ export interface Pose {
   dodgeLocalZ: number;
   /** per-limb health ratio & severed flags (optional; defaults intact) */
   limbs?: LimbPose;
+  /** intact armor flags (optional; defaults all true) */
+  armor?: Record<ArmorKey, boolean>;
+  /** seconds remaining in energy net snare */
+  snared?: number;
 }
 
 export interface GladiatorHandle { group: THREE.Group; pose: Pose; setMoving: (speed01: number) => void }
@@ -40,9 +45,9 @@ function Dash({ len, w = THICK, y = 0, mat }: { len: number; w?: number; y?: num
 const smooth = (cur: number, target: number, rate: number, dt: number) =>
   THREE.MathUtils.lerp(cur, target, 1 - Math.exp(-rate * dt));
 
-/** Articulated stick-figure gladiator: stark Nostalgaia dashes with limb damage colors, severing, and limp choreography. */
-export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: string; scale?: number }>(
-  function Gladiator({ color, scale = 1 }, ref) {
+/** Articulated stick-figure gladiator with 5 modular Spartacus weapon & armor styles. */
+export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: string; scale?: number; style?: StyleId }>(
+  function Gladiator({ color, accent = '#ffc95c', scale = 1, style = 'murmillo' }, ref) {
     const group = useRef<THREE.Group>(null!);
     const root = useRef<THREE.Group>(null!);
     const upper = useRef<THREE.Group>(null!);
@@ -51,6 +56,11 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
     const kneeL = useRef<THREE.Group>(null!), kneeR = useRef<THREE.Group>(null!);
     const shL = useRef<THREE.Group>(null!), shR = useRef<THREE.Group>(null!);
     const elL = useRef<THREE.Group>(null!), elR = useRef<THREE.Group>(null!);
+    const helmGroup = useRef<THREE.Group>(null!);
+    const pauldronGroup = useRef<THREE.Group>(null!);
+    const shieldTrim = useRef<THREE.Mesh>(null!);
+    const snareMesh = useRef<THREE.Mesh>(null!);
+    const cape0 = useRef<THREE.Group>(null!), cape1 = useRef<THREE.Group>(null!), cape2 = useRef<THREE.Group>(null!);
 
     const speed = useRef(0);
     const phase = useRef(0);
@@ -62,11 +72,13 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
 
     const colors = useMemo(() => ({
       base: new THREE.Color(color).lerp(new THREE.Color('#ffffff'), 0.72),
+      gear: new THREE.Color(color),
+      trim: new THREE.Color(accent),
       amber: new THREE.Color('#ffc95c'),
       crimson: new THREE.Color('#ff3b5c'),
       warn: new THREE.Color('#ff3b3b'),
       white: new THREE.Color('#ffffff'),
-    }), [color]);
+    }), [color, accent]);
 
     const mats = useMemo(() => ({
       head: new THREE.MeshBasicMaterial({ color: colors.base }),
@@ -76,6 +88,10 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       legL: new THREE.MeshBasicMaterial({ color: colors.base }),
       legR: new THREE.MeshBasicMaterial({ color: colors.base }),
       sword: new THREE.MeshBasicMaterial({ color: '#ffffff' }),
+      gearSolid: new THREE.MeshBasicMaterial({ color: '#0b051b' }),
+      gearWire: new THREE.MeshBasicMaterial({ color: colors.gear, wireframe: true, transparent: true, opacity: 0.9 }),
+      trimWire: new THREE.MeshBasicMaterial({ color: colors.trim, wireframe: true, transparent: true, opacity: 0.95 }),
+      net: new THREE.MeshBasicMaterial({ color: '#3ff0ff', wireframe: true, transparent: true, opacity: 0.65 }),
     }), [colors]);
 
     useImperativeHandle(ref, () => ({ group: group.current, pose: pose.current, setMoving: (s) => { speed.current = s; } }), []);
@@ -85,13 +101,26 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       const p = pose.current;
       const st = p.stance;
       const limbs = p.limbs;
+      const armor = p.armor;
 
-      // Visibility of severable limbs (leave thigh stumps when shins sever)
+      // Visibility of severable limbs & breakable armor
       head.current.visible = !(limbs?.head.severed);
       shL.current.visible = !(limbs?.armL.severed);
       shR.current.visible = !(limbs?.armR.severed);
       kneeL.current.visible = !(limbs?.legL.severed);
       kneeR.current.visible = !(limbs?.legR.severed);
+      if (helmGroup.current) helmGroup.current.visible = armor?.helm !== false;
+      if (pauldronGroup.current) pauldronGroup.current.visible = armor?.pauldron !== false;
+      if (shieldTrim.current) shieldTrim.current.visible = armor?.shield !== false;
+
+      if (snareMesh.current) {
+        const snared = (p.snared ?? 0) > 0;
+        snareMesh.current.visible = snared;
+        if (snared) {
+          snareMesh.current.rotation.y = clock.elapsedTime * 2.5;
+          snareMesh.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 16) * 0.06);
+        }
+      }
 
       // Movement vector in fighter-local space (fallback to speed.current in Ludus)
       let lvx = p.localVx;
@@ -122,13 +151,13 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       let kneeLX = 0.34 * st + Math.max(0, -cs) * 0.85 * moveMag;
       let kneeRX = 0.26 * st + Math.max(0, cs) * 0.85 * moveMag;
 
-      // Shield arm (left, +X)
+      // Left arm (+X)
       let shLX = THREE.MathUtils.lerp(-0.32 * st + sw * 0.3, -0.92, p.block);
       let shLY = THREE.MathUtils.lerp(0, -0.35, p.block);
       let shLZ = THREE.MathUtils.lerp(0.18, 0.05, p.block);
       let elLX = THREE.MathUtils.lerp(-0.45 - 0.45 * st, -1.25, p.block);
 
-      // Sword arm (right, -X)
+      // Right arm (-X)
       let shRX = -0.38 * st - sw * 0.35;
       let shRY = 0;
       let shRZ = -0.18 - 0.08 * st;
@@ -198,12 +227,14 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
             shRX = -1.15;
             shRZ = THREE.MathUtils.lerp(0.4, 0.9, k);
             elRX = -0.5;
+            if (style === 'dimachaerus') { shLX = -1.1; shLZ = 0.85; elLX = -0.4; }
           } else if (p.state === 'strike') {
             upperY = THREE.MathUtils.lerp(0.88, -0.88, k);
             upperX = 0.28;
             shRX = -1.35;
             shRZ = THREE.MathUtils.lerp(0.9, -1.05, k);
             elRX = -0.2;
+            if (style === 'dimachaerus') { shLX = -1.35; shLZ = THREE.MathUtils.lerp(0.85, -0.95, k); elLX = -0.2; }
           } else {
             upperY = THREE.MathUtils.lerp(-0.88, -0.28, k);
             shRX = THREE.MathUtils.lerp(-1.35, -0.38, k);
@@ -217,6 +248,7 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
             shRX = THREE.MathUtils.lerp(-0.5, -2.25, k);
             shRZ = -0.58;
             elRX = -0.42;
+            if (style === 'dimachaerus') { shLX = -2.2; shLZ = 0.58; elLX = -0.4; }
           } else if (p.state === 'strike') {
             pelvisY -= 0.08 * (1 - k);
             upperX = 0.42;
@@ -224,6 +256,7 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
             shRX = THREE.MathUtils.lerp(-2.25, -0.32, k);
             shRZ = THREE.MathUtils.lerp(-0.58, 0.72, k);
             elRX = -0.14;
+            if (style === 'dimachaerus') { shLX = THREE.MathUtils.lerp(-2.2, -0.32, k); shLZ = THREE.MathUtils.lerp(0.58, -0.72, k); elLX = -0.14; }
           } else {
             upperX = THREE.MathUtils.lerp(0.42, 0.14, k);
             upperY = THREE.MathUtils.lerp(1.05, -0.28, k);
@@ -238,12 +271,16 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
             shRX = THREE.MathUtils.lerp(-0.4, -2.85, k);
             shRZ = -0.1;
             elRX = -0.35;
+            if (style === 'dimachaerus') { shLX = -2.7; shLZ = 0.5; elLX = -0.35; }
+            if (style === 'retiarius') { shLX = -1.6; shLZ = 0.5; elLX = -0.6; }
           } else if (p.state === 'strike') {
             pelvisY -= 0.16 * k;
             upperX = THREE.MathUtils.lerp(-0.22, 0.48, k);
             upperY = THREE.MathUtils.lerp(-0.45, 0.35, k);
             shRX = THREE.MathUtils.lerp(-2.85, -0.15, k);
             elRX = -0.1;
+            if (style === 'dimachaerus') { shLX = THREE.MathUtils.lerp(-2.7, -0.15, k); shLZ = -0.45; elLX = -0.1; }
+            if (style === 'retiarius') { shLX = -1.1; shLZ = -0.35; elLX = -0.2; }
           } else {
             pelvisY -= 0.16 * (1 - k);
             upperX = THREE.MathUtils.lerp(0.48, 0.14, k);
@@ -298,6 +335,16 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       shR.current.rotation.z = smooth(shR.current.rotation.z, shRZ, blend, dt);
       elR.current.rotation.x = smooth(elR.current.rotation.x, elRX, blend, dt);
 
+      // Flowing Hoplomachus cape flutter
+      if (cape0.current && cape1.current && cape2.current) {
+        const flow = 0.22 + Math.max(0, lvz) * 0.55 + (p.state === 'dodge' ? 0.6 : 0);
+        const flutter = Math.sin(clock.elapsedTime * 7 + moveMag * 4) * (0.08 + moveMag * 0.16);
+        cape0.current.rotation.x = smooth(cape0.current.rotation.x, flow + flutter, 10, dt);
+        cape1.current.rotation.x = smooth(cape1.current.rotation.x, flow * 0.45 - flutter * 0.8, 10, dt);
+        cape2.current.rotation.x = smooth(cape2.current.rotation.x, flow * 0.25 + flutter * 1.1, 10, dt);
+        cape0.current.rotation.z = smooth(cape0.current.rotation.z, -lvx * 0.25 - upper.current.rotation.y * 0.3, 10, dt);
+      }
+
       // Per-limb colors: intact -> amber -> crimson (pulsing when broken) + telegraph/hurt blend
       const pulse = 0.5 + 0.5 * Math.sin(clock.elapsedTime * 22);
       const tint = (mat: THREE.MeshBasicMaterial, ratio: number) => {
@@ -316,6 +363,8 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
       tint(mats.legL, limbs?.legL.ratio ?? 1);
       tint(mats.legR, limbs?.legR.ratio ?? 1);
       mats.sword.color.copy(colors.white).lerp(colors.warn, p.telegraph);
+      mats.gearWire.color.copy(colors.gear).lerp(colors.warn, p.telegraph).lerp(colors.white, p.hurt);
+      mats.trimWire.color.copy(colors.trim).lerp(colors.warn, p.telegraph).lerp(colors.white, p.hurt);
     });
 
     return (
@@ -334,30 +383,175 @@ export const Gladiator = forwardRef<GladiatorHandle, { color: string; accent?: s
               <Dash len={0.46} w={THICK * 1.3} mat={mats.legR} />
             </group>
           </group>
-          {/* articulated torso + head + arms */}
+
+          {/* Retiarius energy net snare cage */}
+          <mesh ref={snareMesh} position={[0, 0.15, 0]} visible={false} material={mats.net}>
+            <cylinderGeometry args={[0.52, 0.62, 1.85, 8, 3, true]} />
+          </mesh>
+
+          {/* articulated torso + head + arms + modular neon gear */}
           <group ref={upper} position={[0, 0.04, 0]}>
             <mesh position={[0, 0.30, 0]} material={mats.torso}><boxGeometry args={[THICK * 1.3, 0.56, THICK * 1.3]} /></mesh>
+
+            {/* Layer 2: Head + Style Helm */}
             <group ref={head} position={[0, 0.72, 0]}>
               <mesh position={[0, 0.18, 0]} material={mats.head}><boxGeometry args={[THICK, 0.22, THICK]} /></mesh>
+              <group ref={helmGroup}>
+                {style === 'murmillo' && (
+                  <group position={[0, 0.2, 0]}>
+                    <mesh material={mats.gearSolid}><boxGeometry args={[0.18, 0.24, 0.2]} /></mesh>
+                    <mesh material={mats.gearWire}><boxGeometry args={[0.19, 0.25, 0.21]} /></mesh>
+                    <mesh position={[0, 0.21, -0.02]} material={mats.trimWire}><boxGeometry args={[0.06, 0.18, 0.34]} /></mesh>
+                  </group>
+                )}
+                {style === 'dimachaerus' && (
+                  <group position={[0, 0.2, 0]}>
+                    <mesh position={[0, 0.02, 0.03]} material={mats.gearWire}><boxGeometry args={[0.2, 0.1, 0.18]} /></mesh>
+                    <mesh position={[0.12, 0.16, 0.02]} rotation={[0, 0, -0.42]} material={mats.trimWire}><coneGeometry args={[0.045, 0.28, 4]} /></mesh>
+                    <mesh position={[-0.12, 0.16, 0.02]} rotation={[0, 0, 0.42]} material={mats.trimWire}><coneGeometry args={[0.045, 0.28, 4]} /></mesh>
+                  </group>
+                )}
+                {style === 'executioner' && (
+                  <group position={[0, 0.21, 0]}>
+                    <mesh material={mats.gearSolid}><boxGeometry args={[0.24, 0.28, 0.24]} /></mesh>
+                    <mesh material={mats.trimWire}><boxGeometry args={[0.25, 0.29, 0.25]} /></mesh>
+                    <mesh position={[0, 0.03, 0.13]} material={mats.sword}><boxGeometry args={[0.18, 0.035, 0.02]} /></mesh>
+                  </group>
+                )}
+                {style === 'hoplomachus' && (
+                  <group position={[0, 0.21, 0]}>
+                    <mesh material={mats.gearSolid}><cylinderGeometry args={[0.13, 0.15, 0.25, 8]} /></mesh>
+                    <mesh material={mats.gearWire}><cylinderGeometry args={[0.14, 0.16, 0.26, 8]} /></mesh>
+                    <mesh position={[0, 0.22, -0.01]} material={mats.trimWire}><boxGeometry args={[0.05, 0.22, 0.36]} /></mesh>
+                  </group>
+                )}
+              </group>
             </group>
-            {/* left arm (+X) + shield */}
+
+            {/* Layer 3: Breakable Pauldrons */}
+            <group ref={pauldronGroup}>
+              {style === 'murmillo' && (
+                <group position={[-0.22, 0.56, 0]}>
+                  <mesh rotation={[0, 0, -0.3]} material={mats.trimWire}><cylinderGeometry args={[0.12, 0.13, 0.18, 6]} /></mesh>
+                </group>
+              )}
+              {style === 'dimachaerus' && (
+                <group>
+                  <mesh position={[0.24, 0.66, 0]} rotation={[0, 0, -0.65]} material={mats.trimWire}><coneGeometry args={[0.06, 0.26, 4]} /></mesh>
+                  <mesh position={[-0.24, 0.66, 0]} rotation={[0, 0, 0.65]} material={mats.trimWire}><coneGeometry args={[0.06, 0.26, 4]} /></mesh>
+                </group>
+              )}
+              {style === 'executioner' && (
+                <group>
+                  {([0.29, -0.29] as const).map((x) => (
+                    <group key={x} position={[x, 0.60, 0]}>
+                      <mesh material={mats.gearSolid}><icosahedronGeometry args={[0.18, 0]} /></mesh>
+                      <mesh material={mats.trimWire}><icosahedronGeometry args={[0.2, 0]} /></mesh>
+                      <mesh position={[x > 0 ? 0.05 : -0.05, 0.23, 0]} rotation={[0, 0, x > 0 ? -0.3 : 0.3]} material={mats.trimWire}>
+                        <coneGeometry args={[0.055, 0.28, 4]} />
+                      </mesh>
+                    </group>
+                  ))}
+                </group>
+              )}
+              {style === 'retiarius' && (
+                <group position={[0.26, 0.66, 0]} rotation={[0, 0, -0.25]}>
+                  <mesh material={mats.gearSolid}><boxGeometry args={[0.06, 0.42, 0.28]} /></mesh>
+                  <mesh material={mats.trimWire}><boxGeometry args={[0.07, 0.44, 0.30]} /></mesh>
+                </group>
+              )}
+              {style === 'hoplomachus' && (
+                <group>
+                  <mesh position={[0.23, 0.60, 0]} material={mats.trimWire}><boxGeometry args={[0.15, 0.1, 0.18]} /></mesh>
+                  <mesh position={[-0.23, 0.60, 0]} material={mats.trimWire}><boxGeometry args={[0.15, 0.1, 0.18]} /></mesh>
+                </group>
+              )}
+            </group>
+
+            {/* Hoplomachus 3-segment flowing wireframe cape */}
+            {style === 'hoplomachus' && (
+              <group ref={cape0} position={[0, 0.58, -0.09]}>
+                <mesh position={[0, -0.18, 0]} material={mats.trimWire}><boxGeometry args={[0.42, 0.36, 0.02]} /></mesh>
+                <group ref={cape1} position={[0, -0.36, 0]}>
+                  <mesh position={[0, -0.18, 0]} material={mats.trimWire}><boxGeometry args={[0.48, 0.36, 0.02]} /></mesh>
+                  <group ref={cape2} position={[0, -0.36, 0]}>
+                    <mesh position={[0, -0.18, 0]} material={mats.gearWire}><boxGeometry args={[0.54, 0.36, 0.02]} /></mesh>
+                  </group>
+                </group>
+              </group>
+            )}
+
+            {/* Left arm (+X) + Shield / Off-hand weapon */}
             <group ref={shL} position={[0.22, 0.58, 0]} rotation={[0, 0, 0.18]}>
               <Dash len={0.34} mat={mats.armL} />
               <group ref={elL} position={[0, -0.34, 0]}>
                 <Dash len={0.32} mat={mats.armL} />
-                <mesh position={[0.06, -0.26, 0.12]} rotation={[0, Math.PI / 2, 0]} material={mats.armL}>
-                  <ringGeometry args={[0.22, 0.29, 10]} />
-                </mesh>
+                {style === 'murmillo' && (
+                  <group position={[0.08, -0.22, 0.14]}>
+                    <mesh material={mats.gearSolid}><boxGeometry args={[0.06, 0.84, 0.50]} /></mesh>
+                    <mesh material={mats.gearWire}><boxGeometry args={[0.07, 0.86, 0.52]} /></mesh>
+                    <mesh ref={shieldTrim} material={mats.trimWire}><boxGeometry args={[0.085, 0.92, 0.56]} /></mesh>
+                  </group>
+                )}
+                {style === 'hoplomachus' && (
+                  <group position={[0.08, -0.26, 0.12]} rotation={[0, 0, Math.PI / 2]}>
+                    <mesh material={mats.gearSolid}><cylinderGeometry args={[0.28, 0.28, 0.05, 12]} /></mesh>
+                    <mesh material={mats.gearWire}><cylinderGeometry args={[0.29, 0.29, 0.055, 12]} /></mesh>
+                    <mesh ref={shieldTrim} material={mats.trimWire}><cylinderGeometry args={[0.33, 0.33, 0.06, 12]} /></mesh>
+                  </group>
+                )}
+                {style === 'dimachaerus' && (
+                  <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
+                    <mesh position={[0, -0.36, 0]} material={mats.sword}><boxGeometry args={[0.05, 0.78, 0.06]} /></mesh>
+                    <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.sword}><boxGeometry args={[0.045, 0.26, 0.05]} /></mesh>
+                  </group>
+                )}
+                {style === 'retiarius' && (
+                  <mesh position={[0.04, -0.32, 0.08]} material={mats.net}><icosahedronGeometry args={[0.22, 1]} /></mesh>
+                )}
               </group>
             </group>
-            {/* right arm (-X) + sword */}
+
+            {/* Right arm (-X) + Main weapon */}
             <group ref={shR} position={[-0.22, 0.58, 0]} rotation={[0, 0, -0.18]}>
               <Dash len={0.34} mat={mats.armR} />
               <group ref={elR} position={[0, -0.34, 0]}>
                 <Dash len={0.32} mat={mats.armR} />
-                <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
-                  <mesh position={[0, -0.44, 0]} material={mats.sword}><boxGeometry args={[0.055, 0.92, 0.055]} /></mesh>
-                </group>
+                {style === 'murmillo' && (
+                  <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
+                    <mesh position={[0, -0.05, 0]} material={mats.trimWire}><boxGeometry args={[0.20, 0.04, 0.06]} /></mesh>
+                    <mesh position={[0, -0.44, 0]} material={mats.sword}><boxGeometry args={[0.055, 0.88, 0.06]} /></mesh>
+                  </group>
+                )}
+                {style === 'dimachaerus' && (
+                  <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
+                    <mesh position={[0, -0.36, 0]} material={mats.sword}><boxGeometry args={[0.05, 0.78, 0.06]} /></mesh>
+                    <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.sword}><boxGeometry args={[0.045, 0.26, 0.05]} /></mesh>
+                  </group>
+                )}
+                {style === 'executioner' && (
+                  <group position={[0, -0.32, 0]} rotation={[-0.35, 0, 0]}>
+                    <mesh position={[0, -0.58, 0]} material={mats.gearWire}><boxGeometry args={[0.055, 1.38, 0.055]} /></mesh>
+                    <mesh position={[0, -1.24, 0]} material={mats.gearSolid}><boxGeometry args={[0.28, 0.24, 0.46]} /></mesh>
+                    <mesh position={[0, -1.24, 0]} material={mats.trimWire}><boxGeometry args={[0.30, 0.26, 0.48]} /></mesh>
+                    <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.sword}><coneGeometry args={[0.08, 0.18, 4]} /></mesh>
+                  </group>
+                )}
+                {style === 'retiarius' && (
+                  <group position={[0, -0.32, 0]} rotation={[-0.45, 0, 0]}>
+                    <mesh position={[0, -0.52, 0]} material={mats.gearWire}><boxGeometry args={[0.045, 1.56, 0.045]} /></mesh>
+                    <mesh position={[0, -1.28, 0]} material={mats.trimWire}><boxGeometry args={[0.34, 0.05, 0.05]} /></mesh>
+                    {([-0.14, 0, 0.14] as const).map((x) => (
+                      <mesh key={x} position={[x, -1.46, 0]} material={mats.sword}><boxGeometry args={[0.035, 0.36, 0.035]} /></mesh>
+                    ))}
+                  </group>
+                )}
+                {style === 'hoplomachus' && (
+                  <group position={[0, -0.32, 0]} rotation={[-0.48, 0, 0]}>
+                    <mesh position={[0, -0.50, 0]} material={mats.gearWire}><boxGeometry args={[0.045, 1.65, 0.045]} /></mesh>
+                    <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.sword}><coneGeometry args={[0.08, 0.28, 4]} /></mesh>
+                  </group>
+                )}
               </group>
             </group>
           </group>

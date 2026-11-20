@@ -20,22 +20,25 @@ Unrelated to the Citadel project; repo is only a source of art/tech. Ludus = cal
   - Live white -> amber -> pulsing crimson tinting on both 3D stickmen and HUD stick-doll (`LimbDoll`).
   - Gameplay consequences: severed shield arm disables blocking; severed enemy weapon arm disarms (player weapon arm cripples at 0.65× dmg / 1.25× windup without soft-locking); broken legs trigger limp animation, slow movement, and block dodging; broken head triggers instant neon decapitation.
   - `SeveredPiece` tumbling limb/sword/shield physics debris + partial `Ragdoll` omitting severed parts + Rapier world lifecycle fix across Bout transitions.
-- [ ] **Phase B — 5 Gladiator Weapon Styles & Mid-Fight Armor Shatter** (NEXT: Murmillo, Dimachaerus, Executioner, Retiarius, Hoplomachus + breakable helms/pauldrons/shields + gear-carrying ragdolls).
-- [ ] **Phase C — Excitement Engine** (Dazed state + slow-mo `[E]` Executions, Live Crowd Favor & `T` Taunt, Procedural Web Audio drums/steel/crowd).
+- [x] **Phase B — 5 Gladiator Weapon Styles & Mid-Fight Armor Shatter** — COMPLETE (40/40 tests + `tsc` + `vite build` clean; ready for Wyatt playtest):
+  - 5 distinct gladiator styles (`src/game/arena/styles.ts`): **Murmillo** (gladius + scutum + crested helm), **Dimachaerus** (twin crimson-silver curved blades, no shield (cross-blade guard requires both arms intact at 1.5× stamina), single-arm resilience until both arms lost), **Executioner** (two-handed blunt hammer with heavy armor bleed-through & guard-breaking heavies), **Retiarius** (long trident + energy-net heavy snare slowing movement & locking dodge, unhelmeted with shoulder pauldron), and **Hoplomachus** (long spear thrust + round buckler (+0.08s parry window) + animated 3-segment crimson cape).
+  - Mid-fight breakable armor (`helm`, `pauldron`, `shield`): mitigates limb damage (`0.45×` sharp / `0.75×` blunt), shatters visually on 3D rigs (`Gladiator.tsx`) and launches tumbling wireframe `SeveredPiece` debris + death weapon drops (`ragdoll.ts`).
+  - Persisted equipped style in `store.ts` (`boneyard.save.v1`), swap styles in Armory or at the Arena Gate (`HUD.tsx`), and 8 Ludus NPCs + escalating `boutRosterFor` enemy waves showcasing all 5 silhouettes (`Ludus.tsx`, `run.ts`, `Arena.tsx`).
+- [ ] **Phase C — Excitement Engine** (NEXT: Dazed state + slow-mo `[E]` Executions, Live Crowd Favor & `T` Taunt, Procedural Web Audio drums/steel/crowd).
 - [ ] **Phase D — Restore Citadel Temple Ludus & Colosseum Stands** (Solomon's Temple pavilions/lanterns/sky dome from `8d88a49`, tiered amphitheater with cheering stick spectators & braziers).
 - [ ] **Phase E — Named Rivals, Real Armory, Live Training Yard & Standalone Mac `.app`**.
 
 ## Code map (src/game)
-- `world/` layout + collider math (pure, tested) · `Ludus.tsx`, `Stations.tsx`, `Gladiator.tsx` (articulated stick rig + limb states + limp anims)
-- `arena/combat.ts` pure combat rules, 3-hit combos, bash guard-break, 6-zone limb damage, AI (tested)
-- `arena/ragdoll.ts` + `physics.ts` Rapier partial ragdoll + `SeveredPiece` limb/weapon debris (tested: 50 kills + 30 pieces stable)
+- `world/` layout + collider math (pure, tested) · `Ludus.tsx`, `Stations.tsx`, `Gladiator.tsx` (articulated stick rig + modular helms/pauldrons/capes/weapons + limp/snare visuals)
+- `arena/styles.ts` 5 gladiator styles (`murmillo`, `dimachaerus`, `executioner`, `retiarius`, `hoplomachus`) · `arena/combat.ts` pure combat rules, combos, guard-break, breakable armor, net snare, 6-zone limb damage, AI (tested)
+- `arena/ragdoll.ts` + `physics.ts` Rapier partial ragdoll + `SeveredPiece` limb/armor/weapon debris (tested: 50 kills + 40 mixed pieces stable)
 - `arena/effects.tsx` `ShardPool`, `SlashPool`/`SlashRibbons`, `GhostPool`/`DashGhosts`
-- `arena/boons.ts` + `arena/run.ts` 12 Fate boons, 5-bout ladder, crest looks
-- `arena/arenaStore.ts` HUD state (`playerLimbs`, enemy `limbs`, locked target, combo, callouts) · `Arena.tsx` scene + sim loop
+- `arena/boons.ts` + `arena/run.ts` 12 Fate boons, 5-bout ladder (`boutRosterFor`), crest looks
+- `arena/arenaStore.ts` HUD state (`playerLimbs`, enemy `limbs`, `styleName`, locked target, combo, callouts) · `Arena.tsx` scene + sim loop
 - `art/` Citadel art kept: columns, synthwave horizon, starfield, spores, palette · `StaticBatch.tsx`
-- `store.ts` zustand + localStorage save (`boneyard.save.v1`)
+- `store.ts` zustand + localStorage save (`boneyard.save.v1`, `style` + `look`)
 
 ## Known issues / honest notes
 - Save is plain localStorage (`boneyard.save.v1`).
-- Training Yard is a placeholder until Phase E; Armory equips unlocked crest colors until Phase B/E adds weapon styles & armor.
+- Training Yard is a placeholder until Phase E (Armory now equips both Fighting Styles and Cosmetic Crest Colors).
 - Only external runtime dependency beyond R3F/Three/Zustand: `@dimforge/rapier3d-compat` (CSP has `wasm-unsafe-eval`).

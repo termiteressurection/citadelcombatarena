@@ -30,7 +30,7 @@ export function toLimbHud(limbs: Limbs): LimbHud {
   };
 }
 
-export interface EnemyBar { id: number; name: string; hp: number; max: number; limbs: LimbHud }
+export interface EnemyBar { id: number; name: string; styleName: string; hp: number; max: number; limbs: LimbHud }
 export interface Callout { text: string; color: string; id: number }
 
 interface ArenaHud {
