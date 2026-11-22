@@ -244,6 +244,7 @@ function TownStatusStrip() {
 function StreetOverlays() {
   const g = useGame();
   const [showToast, setShowToast] = useState(false);
+  const [showCallout, setShowCallout] = useState(false);
 
   useEffect(() => {
     if (!g.streetToast) { setShowToast(false); return; }
@@ -252,10 +253,52 @@ function StreetOverlays() {
     return () => clearTimeout(id);
   }, [g.streetToast?.id]);
 
+  useEffect(() => {
+    if (!g.streetCallout) { setShowCallout(false); return; }
+    setShowCallout(true);
+    const id = setTimeout(() => setShowCallout(false), 1100);
+    return () => clearTimeout(id);
+  }, [g.streetCallout?.id]);
+
   if (g.scene !== 'ludus') return null;
 
   return (
     <>
+      {(g.streetLockName || g.weaponDrawn) && !g.onCycle && !g.panel && !g.atlasOpen && !g.activePropertyId && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)',
+            padding: '4px 12px', fontSize: 11, letterSpacing: '.14em',
+            borderColor: g.streetArmed ? '#3ff0ff' : '#ff4fd8',
+            color: '#e9e6ff', whiteSpace: 'nowrap', display: 'flex', gap: 10,
+          }}
+        >
+          <span style={{ color: '#ffc95c', fontWeight: 700 }}>
+            STANCE: {g.streetStance === 'high' ? 'HIGH ▲' : g.streetStance === 'low' ? 'LOW ▼' : 'MID ●'}
+          </span>
+          <span style={{ color: g.streetArmed ? '#4dffa0' : '#ff4fd8' }}>
+            {g.streetArmed ? 'ARMED [F THROW]' : 'BARE-HANDED [F GRAB]'}
+          </span>
+          {g.streetLockName && <span style={{ color: '#3ff0ff' }}>· {g.streetLockName}</span>}
+        </div>
+      )}
+
+      {showCallout && g.streetCallout && (
+        <div
+          style={{
+            position: 'absolute', top: 132, left: '50%', transform: 'translateX(-50%)',
+            fontSize: 22, fontWeight: 700, letterSpacing: '.24em',
+            color: g.streetCallout.color,
+            textShadow: `2px 2px 0 #05030a, 0 0 18px ${g.streetCallout.color}`,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {g.streetCallout.text}
+        </div>
+      )}
+
       {showToast && g.streetToast && (
         <div
           className="ps1-box"
@@ -269,6 +312,34 @@ function StreetOverlays() {
             {g.streetToast.speaker}
           </div>
           <div style={{ fontSize: 12, color: '#e9e6ff' }}>"{g.streetToast.text}"</div>
+        </div>
+      )}
+
+      {g.streetExecuteReady && !g.onCycle && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && (
+        <div
+          className="ps1-box limb-crit"
+          style={{
+            position: 'absolute', bottom: 108, left: '50%', transform: 'translateX(-50%)',
+            padding: '7px 18px', borderColor: '#ffc95c',
+            background: '#22060ee6', color: '#ffc95c',
+            fontSize: 14, fontWeight: 700, letterSpacing: '.2em',
+            textShadow: '0 0 10px #ff3b5c',
+          }}
+        >
+          [E] EXECUTE FINISHER!
+        </div>
+      )}
+
+      {g.onCycle && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', bottom: 54, left: '50%', transform: 'translateX(-50%)',
+            padding: '6px 16px', borderColor: '#3ff0ff88',
+            color: '#3ff0ff', fontSize: 11, letterSpacing: '.14em', whiteSpace: 'nowrap',
+          }}
+        >
+          [SPACE] HOLD TO POWER-DRIFT · RELEASE FOR TURBO BOOST · [LMB] FLYING DISMOUNT CLEAVE
         </div>
       )}
 
@@ -1485,6 +1556,38 @@ function ArenaHud() {
       </div>
 
       <CalloutFlash />
+      {a.phase === 'fight' && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', top: 108, left: '50%', transform: 'translateX(-50%)',
+            padding: '4px 14px', fontSize: 11, letterSpacing: '.14em',
+            borderColor: a.armed ? '#3ff0ff88' : '#ff4fd8',
+            color: '#e9e6ff', whiteSpace: 'nowrap', display: 'flex', gap: 12,
+          }}
+        >
+          <span style={{ color: '#ffc95c', fontWeight: 700 }}>
+            STANCE: {a.stance === 'high' ? 'HIGH ▲' : a.stance === 'low' ? 'LOW ▼' : 'MID ●'}
+          </span>
+          <span style={{ color: a.armed ? '#4dffa0' : '#ff4fd8' }}>
+            {a.armed ? 'ARMED · [F] THROW' : 'BARE-HANDED · [F] GRAB'}
+          </span>
+        </div>
+      )}
+      {a.phase === 'fight' && a.executeReady && (
+        <div
+          className="ps1-box limb-crit"
+          style={{
+            position: 'absolute', bottom: 84, left: '50%', transform: 'translateX(-50%)',
+            padding: '7px 18px', borderColor: '#ffc95c',
+            background: '#22060ee6', color: '#ffc95c',
+            fontSize: 14, fontWeight: 700, letterSpacing: '.2em',
+            textShadow: '0 0 10px #ff3b5c',
+          }}
+        >
+          [E] EXECUTE FINISHER!
+        </div>
+      )}
       {a.phase === 'intro' && (
         <div className="panel" style={{ background: 'transparent' }}>
           <div className="ps1-box" style={{ padding: '16px 36px', borderColor: activeCol.color }}>
@@ -1531,14 +1634,16 @@ function ArenaHud() {
         </div>
       )}
       <div className="controls">
-        <KeyCap k="WASD" label="Move" />
-        <KeyCap k="LMB/J" label="Combo" />
-        <KeyCap k="RMB/K" label="Heavy" />
-        <KeyCap k="F" label="Bash" />
-        <KeyCap k="SHIFT" label="Parry/Block" />
-        <KeyCap k="SPACE" label="Dodge" />
+        <KeyCap k="A/D" label="Lane (×2 Dash)" />
+        <KeyCap k="W/S" label="Stance" />
+        <KeyCap k="SPACE" label="Jump/DiveKick" />
+        <KeyCap k="LMB/J" label="Thrust" />
+        <KeyCap k="RMB/K" label="Launch/Sweep" />
+        <KeyCap k="F" label="Throw/Grab" />
+        <KeyCap k="E" label="Execute" />
+        <KeyCap k="SHIFT" label="Guard/Sidestep" />
         <KeyCap k="H" label="Restore" />
-        <KeyCap k="TAB" label="Lock" />
+        <KeyCap k="TAB" label="2.5D/Free" />
         <KeyCap k="P" label="CRT" />
       </div>
     </>
@@ -1584,6 +1689,9 @@ export function HUD() {
         <div className="controls">
           <KeyCap k="WASD" label="Move" />
           <KeyCap k="V" label="Cycle" />
+          <KeyCap k="SPACE" label="Dash/Drift" />
+          <KeyCap k="TAB" label="Lock" />
+          <KeyCap k="E" label="Execute" />
           <KeyCap k="M" label="Atlas" />
           <KeyCap k="T" label="Greet" />
           <KeyCap k="G" label="Provoke" />

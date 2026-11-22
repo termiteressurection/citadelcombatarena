@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ATTACKS, KINDS, NO_INTENT, PARRY_WINDOW, RIPOSTE_DMG_MUL, aiIntent, defaultMods, makeFighter, parryWindowOf, pickTargetZone, resolveStrike, startAttack, stepFighter } from '../arena/combat';
+import { ATTACKS, DODGE_TIME, KINDS, NO_INTENT, PARRY_WINDOW, RIPOSTE_DMG_MUL, aiIntent, canExecuteTarget, defaultMods, makeFighter, parryWindowOf, pickTargetZone, resolveStrike, startAttack, stepFighter, stepWeaponProps, throwFighterWeapon, tryExecute, tryPickupWeapon } from '../arena/combat';
 import { STYLE_IDS, moveOf, styleOf } from '../arena/styles';
 
 const duel = () => {
@@ -443,5 +443,179 @@ describe('combat rules', () => {
       stepFighter(e2, it2, 1 / 60, p);
       expect(Number.isFinite(e1.x + e1.z + e2.x + e2.z)).toBe(true);
     }
+  });
+
+  it('10/10 combat: magnetic windup closes 3.6m gap while 9m whiffs', () => {
+    const p = makeFighter(0, 'player', 0, 0);
+    const eClose = makeFighter(1, 'skirmisher', 0, 3.6);
+    p.yaw = 0;
+    startAttack(p, 'heavy');
+    let hit = false;
+    for (let i = 0; i < 45; i++) {
+      if (stepFighter(p, NO_INTENT, 1 / 60, eClose)) {
+        hit = resolveStrike(p, [eClose]).length > 0;
+        break;
+      }
+    }
+    expect(p.z).toBeGreaterThan(0.5);
+    expect(hit).toBe(true);
+
+    const p2 = makeFighter(2, 'player', 0, 0);
+    const eFar = makeFighter(3, 'skirmisher', 0, 9.0);
+    p2.yaw = 0;
+    startAttack(p2, 'heavy');
+    let farHit = false;
+    for (let i = 0; i < 45; i++) {
+      if (stepFighter(p2, NO_INTENT, 1 / 60, eFar)) {
+        farHit = resolveStrike(p2, [eFar]).length > 0;
+        break;
+      }
+    }
+    expect(farHit).toBe(false);
+  });
+
+  it('10/10 combat: dodge cancels into Dash-Strike after 38% of DODGE_TIME', () => {
+    const { p, e } = duel();
+    stepFighter(p, { ...NO_INTENT, moveX: 1, dodge: true }, 1 / 60, e);
+    expect(p.state).toBe('dodge');
+    // Still inside first 35% -> cannot cancel yet
+    run(p, DODGE_TIME * 0.25, e);
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    expect(p.state).toBe('dodge');
+    // Past 38% -> Dash-Strike triggers cleanly
+    run(p, DODGE_TIME * 0.20, e);
+    stepFighter(p, { ...NO_INTENT, light: true }, 1 / 60, e);
+    expect(p.state).toBe('windup');
+    expect(p.atk).toBe('light');
+  });
+
+  it('10/10 combat: late recovery cancels smoothly into movement', () => {
+    const { p, e } = duel();
+    startAttack(p, 'light');
+    for (let i = 0; i < 40; i++) {
+      stepFighter(p, NO_INTENT, 1 / 60, e);
+      if (p.state === 'recover') break;
+    }
+    expect(p.state).toBe('recover');
+    run(p, ATTACKS.light.recover * 0.72, e);
+    stepFighter(p, { ...NO_INTENT, moveX: 1 }, 1 / 60, e);
+    expect(p.state).toBe('idle');
+  });
+
+  it('10/10 combat: tryExecute decapitates dazed target and restores HP & stamina', () => {
+    const p = makeFighter(0, 'player', 0, 0);
+    const e = makeFighter(1, 'skirmisher', 0, 1.8);
+    p.hp = 50;
+    p.stamina = 20;
+    e.dazed = 1.8;
+    expect(canExecuteTarget(e)).toBe(true);
+    const ev = tryExecute(p, [e]);
+    expect(ev).not.toBeNull();
+    expect(ev?.type).toBe('kill');
+    expect(ev?.decap).toBe(true);
+    expect(e.state).toBe('dead');
+    expect(e.limbs.head.severed).toBe(true);
+    expect(p.hp).toBeGreaterThan(50);
+    expect(p.stamina).toBeGreaterThan(20);
+  });
+
+  it('Tekken x Nidhogg: stance flick parries and beat-disarms attacker', () => {
+    const { p, e } = duel();
+    p.guardHeight = 'high';
+    startAttack(p, 'light');
+    stepFighter(e, { ...NO_INTENT, stance: 'high' }, 1 / 60, p);
+    for (let i = 0; i < 30; i++) {
+      if (stepFighter(p, NO_INTENT, 1 / 60, e)) break;
+      stepFighter(e, { ...NO_INTENT, stance: 'high' }, 1 / 60, p);
+    }
+    const evs = resolveStrike(p, [e]);
+    expect(evs.length).toBe(1);
+    expect(evs[0].type).toBe('parry');
+    expect(evs[0].weaponDropped).toBe(true);
+    expect(p.weaponDisarmed).toBe(true);
+  });
+
+  it('Tekken x Nidhogg: low guard ducks high attacks & jump hops over low attacks', () => {
+    const { p, e } = duel();
+    p.guardHeight = 'high';
+    e.guardHeight = 'low';
+    e.blocking = true;
+    startAttack(p, 'light');
+    for (let i = 0; i < 30; i++) {
+      if (stepFighter(p, NO_INTENT, 1 / 60, e)) break;
+    }
+    expect(resolveStrike(p, [e]).length).toBe(0);
+
+    const d2 = duel();
+    d2.p.guardHeight = 'low';
+    d2.e.airY = 0.7;
+    startAttack(d2.p, 'light');
+    for (let i = 0; i < 30; i++) {
+      if (stepFighter(d2.p, NO_INTENT, 1 / 60, d2.e)) break;
+    }
+    expect(resolveStrike(d2.p, [d2.e]).length).toBe(0);
+  });
+
+  it('Tekken x Nidhogg: weapon throw impales target and floor pickup re-arms', () => {
+    const p = makeFighter(0, 'player', 0, 0);
+    const e = makeFighter(1, 'skirmisher', 0, 4);
+    p.yaw = 0;
+    const prop = throwFighterWeapon(p, 1);
+    expect(prop).not.toBeNull();
+    expect(p.weaponDisarmed).toBe(true);
+    const props = [prop!];
+    let impaled = false;
+    for (let i = 0; i < 40; i++) {
+      const evs = stepWeaponProps(props, [p, e], 1 / 60, 20);
+      if (evs.some((ev) => ev.thrownHit && ev.dmg > 0)) impaled = true;
+    }
+    expect(impaled).toBe(true);
+    expect(props[0].flying).toBe(false);
+    p.x = props[0].x;
+    p.z = props[0].z;
+    const picked = tryPickupWeapon(p, props, 2.2);
+    expect(picked).not.toBeNull();
+    expect(p.weaponDisarmed).toBe(false);
+  });
+
+  it('Tekken x Nidhogg: launcher pops target airborne for juggles & dive-kick disarms', () => {
+    const { p, e } = duel();
+    p.guardHeight = 'low';
+    startAttack(p, 'heavy');
+    for (let i = 0; i < 45; i++) {
+      if (stepFighter(p, NO_INTENT, 1 / 60, e)) break;
+    }
+    const launchEvs = resolveStrike(p, [e]);
+    expect(launchEvs[0].launched).toBe(true);
+    expect(e.airY).toBeGreaterThan(0);
+
+    // Follow-up juggle while enemy is airborne
+    p.state = 'idle';
+    p.guardHeight = 'mid';
+    p.stamina = 100;
+    startAttack(p, 'light');
+    for (let i = 0; i < 30; i++) {
+      stepFighter(e, NO_INTENT, 1 / 60, p);
+      if (stepFighter(p, NO_INTENT, 1 / 60, e)) break;
+    }
+    const jugEvs = resolveStrike(p, [e]);
+    expect(jugEvs[0].juggled).toBe(true);
+    expect(e.juggleCount).toBe(2);
+
+    // Flying dive-kick disarms armed foe
+    const d3 = duel();
+    stepFighter(d3.p, { ...NO_INTENT, jump: true }, 1 / 60, d3.e);
+    run(d3.p, 0.12, d3.e);
+    stepFighter(d3.p, { ...NO_INTENT, light: true }, 1 / 60, d3.e);
+    expect(d3.p.diveKicking).toBe(true);
+    let struck = false;
+    for (let i = 0; i < 30; i++) {
+      if (stepFighter(d3.p, NO_INTENT, 1 / 60, d3.e)) { struck = true; break; }
+    }
+    expect(struck).toBe(true);
+    const dkEvs = resolveStrike(d3.p, [d3.e]);
+    expect(dkEvs[0].diveKick).toBe(true);
+    expect(dkEvs[0].weaponDropped).toBe(true);
+    expect(d3.e.weaponDisarmed).toBe(true);
   });
 });

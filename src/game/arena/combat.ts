@@ -124,6 +124,8 @@ export interface AiState {
   targetBlockT: number;
 }
 
+export type StanceHeight = 'high' | 'mid' | 'low';
+
 export interface Fighter {
   id: number; kind: Kind; style: StyleId; gear?: ResolvedGear; team: 'p' | 'e'; stats: Stats;
   x: number; z: number; vx: number; vz: number; yaw: number;
@@ -131,6 +133,15 @@ export interface Fighter {
   limbs: Limbs;
   armor: Armor;
   snared: number;
+  dazed: number;
+  guardHeight: StanceHeight;
+  stanceAge: number;
+  weaponDisarmed: boolean;
+  airY: number;
+  airVy: number;
+  juggleCount: number;
+  diveKicking: boolean;
+  wallSplat: number;
   state: State; atk: Atk | null; t: number; stagger: number;
   blocking: boolean; blockT: number; iframes: number;
   parryHold: number; parryCd: number; riposte: number; riposteActive: boolean;
@@ -146,6 +157,9 @@ export interface Intent {
   moveX: number; moveZ: number;
   light: boolean; heavy: boolean; bash: boolean;
   block: boolean; parry?: boolean; dodge: boolean;
+  stance?: StanceHeight;
+  jump?: boolean;
+  throwWeapon?: boolean;
 }
 export const NO_INTENT: Intent = { moveX: 0, moveZ: 0, light: false, heavy: false, bash: false, block: false, parry: false, dodge: false };
 
@@ -155,6 +169,7 @@ export interface HitEvent {
   dx: number; dz: number; x: number; z: number;
   zone: LimbKey; broken?: LimbKey; severed?: LimbKey; decap?: boolean;
   armorBroken?: ArmorKey; snared?: boolean; riposte?: boolean;
+  weaponDropped?: boolean; launched?: boolean; juggled?: boolean; diveKick?: boolean; thrownHit?: boolean;
 }
 
 export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: Mods = defaultMods(), style?: StyleId, gear?: ResolvedGear): Fighter {
@@ -168,6 +183,15 @@ export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: 
     limbs: makeLimbs(maxHp),
     armor: makeArmor(resolvedGear),
     snared: 0,
+    dazed: 0,
+    guardHeight: 'mid',
+    stanceAge: 99,
+    weaponDisarmed: false,
+    airY: 0,
+    airVy: 0,
+    juggleCount: 0,
+    diveKicking: false,
+    wallSplat: 0,
     state: 'idle', atk: null, t: 0, stagger: 0, blocking: false, blockT: 0, iframes: 0,
     parryHold: 0, parryCd: 0, riposte: 0, riposteActive: false,
     dodgeX: 0, dodgeZ: 0, kx: 0, kz: 0,
@@ -207,6 +231,8 @@ export function isDisarmedOf(f: Fighter): boolean {
   return st.dualWield ? (f.limbs.armR.severed && f.limbs.armL.severed) : f.limbs.armR.severed;
 }
 
+export const hasWeaponOf = (f: Fighter): boolean => !isDisarmedOf(f) && !f.weaponDisarmed;
+
 const isArmWeak = (f: Fighter): boolean => {
   const st = gearOf(f);
   if (isDisarmedOf(f)) return false;
@@ -218,12 +244,19 @@ export function windupOf(f: Fighter, a: Atk): number {
   const mv = st.moves[a];
   const crippledArm = isArmWeak(f) ? 1.25 : 1;
   const riposteSpeed = f.riposteActive || f.riposte > 0 ? 0.68 : 1;
-  const raw = ATTACKS[a].windup * f.stats.windupMul * st.windupMul * (mv.windupMul ?? 1) * crippledArm * riposteSpeed;
+  const bareFast = f.weaponDisarmed && !isDisarmedOf(f) ? 0.75 : 1;
+  const raw = ATTACKS[a].windup * f.stats.windupMul * st.windupMul * (mv.windupMul ?? 1) * crippledArm * riposteSpeed * bareFast;
   return f.team === 'e' ? Math.max(0.4, raw) : raw;
 }
 const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
 
-export function pickTargetZone(atk: Atk, v: Fighter): LimbKey {
+export function pickTargetZone(atk: Atk, v: Fighter, stance: StanceHeight = 'mid'): LimbKey {
+  if (stance === 'high') return 'head';
+  if (stance === 'low') {
+    if (v.limbs.legL.hp > 0 && !v.limbs.legL.severed) return 'legL';
+    if (v.limbs.legR.hp > 0 && !v.limbs.legR.severed) return 'legR';
+    return 'torso';
+  }
   const grp = ATTACKS[atk].zone;
   if (grp === 'armL') return v.limbs.armL.hp > 0 && !v.limbs.armL.severed ? 'armL' : 'torso';
   if (grp === 'armR') return v.limbs.armR.hp > 0 && !v.limbs.armR.severed ? 'armR' : 'torso';
@@ -253,7 +286,7 @@ export function startAttack(f: Fighter, a: Atk): boolean {
 export function stagger(f: Fighter, dur: number): void {
   if (f.state === 'dead') return;
   f.state = 'stagger'; f.stagger = dur; f.t = 0; f.atk = null; f.blocking = false;
-  f.parryHold = 0; f.riposteActive = false;
+  f.parryHold = 0; f.riposteActive = false; f.diveKicking = false;
   f.comboStep = 0; f.comboTimer = 0; f.queuedAtk = null;
 }
 
@@ -277,7 +310,7 @@ function enterDodge(f: Fighter, i: Intent): void {
   f.dodgeLocalX = f.dodgeX * rightX + f.dodgeZ * rightZ;
   f.stamina -= dodgeCostOf(f); f.staminaDelay = 0.6;
   f.state = 'dodge'; f.t = 0; f.iframes = DODGE_IFRAMES; f.blocking = false;
-  f.parryHold = 0; f.riposteActive = false;
+  f.parryHold = 0; f.riposteActive = false; f.diveKicking = false;
   f.comboStep = 0; f.comboTimer = 0; f.queuedAtk = null;
 }
 
@@ -292,6 +325,13 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   f.facingTarget = target !== null;
   f.iframes = Math.max(0, f.iframes - dt);
   f.snared = Math.max(0, f.snared - dt);
+  f.dazed = Math.max(0, f.dazed - dt);
+  f.wallSplat = Math.max(0, f.wallSplat - dt);
+  f.stanceAge += dt;
+  if (i.stance && i.stance !== f.guardHeight) {
+    f.guardHeight = i.stance;
+    f.stanceAge = 0;
+  }
   f.parryHold = Math.max(0, f.parryHold - dt);
   f.parryCd = Math.max(0, f.parryCd - dt);
   f.riposte = Math.max(0, f.riposte - dt);
@@ -313,7 +353,7 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
       const wantYaw = Math.atan2(i.moveX, i.moveZ);
       let d = wantYaw - f.yaw;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      f.yaw += d * (1 - Math.exp(-12 * dt));
+      f.yaw += d * (1 - Math.exp(-15 * dt));
     }
   }
 
@@ -326,18 +366,64 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   const brokenLegs = (f.limbs.legL.hp <= 0 ? 1 : 0) + (f.limbs.legR.hp <= 0 ? 1 : 0);
   const legSpeedMul = brokenLegs === 0 ? 1 : brokenLegs === 1 ? 0.55 : 0.42;
   const snareMul = f.snared > 0 ? 0.25 : 1;
+  const dazeMul = f.dazed > 0 ? 0.45 : 1;
   const canDodge = brokenLegs === 0 && f.snared <= 0 && f.stamina >= dodgeCostOf(f);
 
-  let speedMul = 1;
+  // Tekken / Nidhogg Jump & Airborne Flying Dive-Kick
+  if (i.jump && f.airY === 0 && f.state === 'idle' && brokenLegs === 0 && f.snared <= 0 && f.wallSplat <= 0) {
+    f.airVy = 7.8;
+    f.airY = 0.02;
+  }
+  if (f.airY > 0 || f.airVy !== 0) {
+    if (f.airY > 0.15 && !f.diveKicking && (f.state === 'idle' || f.state === 'windup') && (i.light || i.heavy)) {
+      f.diveKicking = true;
+      f.state = 'windup';
+      f.atk = 'heavy';
+      f.t = windupOf(f, 'heavy') * 0.72;
+      f.blocking = false;
+      f.parryHold = 0;
+      f.queuedAtk = null;
+      f.kx += Math.sin(f.yaw) * 11.5;
+      f.kz += Math.cos(f.yaw) * 11.5;
+      f.airVy = Math.min(f.airVy, -1.2);
+    }
+    f.airVy -= 21 * dt;
+    f.airY += f.airVy * dt;
+    if (f.airY <= 0) {
+      f.airY = 0;
+      f.airVy = 0;
+      f.juggleCount = 0;
+      f.diveKicking = false;
+    }
+  }
+
+  let speedMul = dazeMul * (f.weaponDisarmed ? 1.22 : 1);
+  let windupPullX = 0;
+  let windupPullZ = 0;
   switch (f.state) {
     case 'stagger':
       speedMul = 0;
-      if (f.t >= f.stagger) { f.state = 'idle'; f.t = 0; }
+      if (f.t >= f.stagger && f.airY <= 0) { f.state = 'idle'; f.t = 0; }
       break;
-    case 'dodge':
+    case 'dodge': {
       f.vx = f.dodgeX * DODGE_SPEED; f.vz = f.dodgeZ * DODGE_SPEED;
-      if (f.t >= DODGE_TIME) { f.state = 'idle'; f.t = 0; f.iframes = 0; }
+      if (i.light && !disarmed) f.queuedAtk = 'light';
+      else if (i.heavy && !disarmed) f.queuedAtk = 'heavy';
+      else if (i.bash) f.queuedAtk = 'bash';
+      if (f.t >= DODGE_TIME * 0.38 && f.queuedAtk && f.stamina >= ATTACKS[f.queuedAtk].stamina) {
+        const dashAtk = f.queuedAtk;
+        f.iframes = 0;
+        f.state = 'idle';
+        f.queuedAtk = null;
+        if (startAttack(f, dashAtk)) {
+          f.kx += Math.sin(f.yaw) * 4.5 * legSpeedMul;
+          f.kz += Math.cos(f.yaw) * 4.5 * legSpeedMul;
+          break;
+        }
+      }
+      if (f.t >= DODGE_TIME) { f.state = 'idle'; f.t = 0; f.iframes = 0; f.queuedAtk = null; }
       break;
+    }
     case 'windup': {
       speedMul = 0.35;
       const wt = windupOf(f, f.atk!);
@@ -346,12 +432,31 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
         speedMul = 0.5;
         break;
       }
+      const at = ATTACKS[f.atk!];
+      const mv = st.moves[f.atk!];
+      const reach = (st.netHeavy && f.atk === 'heavy' ? 4.6 : at.reach * st.reachMul * (mv.reachMul ?? 1));
+      const dTarget = target ? Math.hypot(target.x - f.x, target.z - f.z) : Infinity;
+
+      // Pre-impact magnetic windup lunge so strikes close the gap BEFORE the hit frame
+      if (f.t >= wt * 0.35) {
+        const lFactor = st.lungeMul * (mv.lungeMul ?? 1) * legSpeedMul;
+        if (target && dTarget > 1.48 && dTarget <= reach + 1.85) {
+          const pullSpd = Math.min(14, (dTarget - 1.38) / Math.max(0.05, wt - f.t)) * legSpeedMul;
+          windupPullX = Math.sin(f.yaw) * pullSpd;
+          windupPullZ = Math.cos(f.yaw) * pullSpd;
+        } else if (!target) {
+          const baseLunge = Math.min(9, at.lunge * 0.72 * lFactor);
+          windupPullX = Math.sin(f.yaw) * baseLunge;
+          windupPullZ = Math.cos(f.yaw) * baseLunge;
+        }
+      }
+
       if (f.t >= wt) {
-        const at = ATTACKS[f.atk!];
-        const mv = st.moves[f.atk!];
         f.state = 'strike'; f.t = 0; strikeFrame = true;
-        f.kx += Math.sin(f.yaw) * at.lunge * st.lungeMul * (mv.lungeMul ?? 1) * legSpeedMul;
-        f.kz += Math.cos(f.yaw) * at.lunge * st.lungeMul * (mv.lungeMul ?? 1) * legSpeedMul;
+        const closeClamp = target && dTarget < 1.75 ? 0.35 : 1.0;
+        const follow = at.lunge * st.lungeMul * (mv.lungeMul ?? 1) * legSpeedMul * closeClamp;
+        f.kx += Math.sin(f.yaw) * follow;
+        f.kz += Math.cos(f.yaw) * follow;
       }
       break;
     }
@@ -360,7 +465,7 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
       if (f.t >= ATTACKS[f.atk!].strike) { f.state = 'recover'; f.t = 0; }
       break;
     case 'recover': {
-      speedMul = 0.5;
+      speedMul = 0.55;
       if (i.parry && canBlock && f.parryCd <= 0 && f.stamina > 1) {
         enterParry(f);
         speedMul = 0.5;
@@ -375,6 +480,9 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
         const next = f.queuedAtk;
         f.state = 'idle'; f.atk = null; f.queuedAtk = null;
         startAttack(f, next);
+      } else if (!f.queuedAtk && f.t >= rec * 0.65 && Math.hypot(i.moveX, i.moveZ) > 0.25) {
+        f.state = 'idle'; f.atk = null; f.t = 0; f.queuedAtk = null;
+        f.riposteActive = false;
       } else if (f.t >= rec) {
         f.state = 'idle'; f.atk = null; f.t = 0; f.queuedAtk = null;
         f.riposteActive = false;
@@ -419,8 +527,9 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   if (f.state !== 'dodge') {
     const len = Math.hypot(i.moveX, i.moveZ) || 1;
     const sp = f.stats.speed * st.speedMul * f.mods.speed * speedMul * legSpeedMul * snareMul * Math.min(1, Math.hypot(i.moveX, i.moveZ));
-    const tx = (i.moveX / len) * sp, tz = (i.moveZ / len) * sp;
-    const a = 1 - Math.exp(-14 * dt);
+    const tx = (i.moveX / len) * sp + windupPullX;
+    const tz = (i.moveZ / len) * sp + windupPullZ;
+    const a = 1 - Math.exp(-16 * dt);
     f.vx += (tx - f.vx) * a; f.vz += (tz - f.vz) * a;
   }
   f.x += (f.vx + f.kx) * dt; f.z += (f.vz + f.kz) * dt;
@@ -441,32 +550,51 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
   const st = gearOf(a);
   const mv = st.moves[a.atk];
   const heavy = a.atk === 'heavy';
+  const diveKick = a.diveKicking;
+  const bareHanded = a.weaponDisarmed && !diveKick;
   const armMul = isArmWeak(a) ? 0.65 : 1;
   const riposteHit = a.riposteActive;
   const riposteMul = riposteHit ? RIPOSTE_DMG_MUL + (a.mods.riposteBonus ?? 0) : 1;
-  const reach = st.netHeavy && heavy ? 4.6 : at.reach * st.reachMul * (mv.reachMul ?? 1);
+  const reach = st.netHeavy && heavy ? 4.6 : at.reach * st.reachMul * (mv.reachMul ?? 1) * (bareHanded ? 0.85 : 1);
   const half = mv.half ?? at.half;
-  const knock = at.knock * st.knockMul * (mv.knockMul ?? 1);
-  const isBlunt = st.blunt || Boolean(at.guardBreak);
+  const knock = at.knock * st.knockMul * (mv.knockMul ?? 1) * (diveKick ? 1.35 : 1);
+  const isBlunt = st.blunt || Boolean(at.guardBreak) || diveKick || bareHanded;
+  const atkHeight: StanceHeight = diveKick
+    ? 'high'
+    : a.guardHeight !== 'mid'
+      ? a.guardHeight
+      : a.atk === 'heavy'
+        ? 'high'
+        : a.atk === 'light3' || a.atk === 'bash'
+          ? 'low'
+          : 'mid';
 
   for (const v of victims) {
     if (v.state === 'dead' || v.team === a.team || v.iframes > 0) continue;
+    const vertTol = heavy || diveKick || v.airY > 0 ? 2.4 : 1.75;
+    if (Math.abs(a.airY - v.airY) > vertTol) continue;
     const dx = v.x - a.x, dz = v.z - a.z, d = Math.hypot(dx, dz) || 1e-6;
     if (d > reach + v.stats.radius) continue;
     const ang = Math.atan2(dx, dz) - a.yaw;
     if (Math.abs(Math.atan2(Math.sin(ang), Math.cos(ang))) > half) continue;
+
+    // Nidhogg high-duck & low-jump evasion
+    if (atkHeight === 'high' && !diveKick && v.guardHeight === 'low' && v.blocking && v.state === 'idle' && v.airY === 0) continue;
+    if (atkHeight === 'low' && v.airY > 0.45 && v.state !== 'stagger') continue;
+
     const ux = dx / d, uz = dz / d;
-    const dmg = at.dmg * a.stats.dmgMul * st.dmgMul * (mv.dmgMul ?? 1) * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1) * armMul * riposteMul;
+    const dmg = at.dmg * a.stats.dmgMul * st.dmgMul * (mv.dmgMul ?? 1) * a.mods.dmg * (heavy ? a.mods.heavyDmg : 1) * armMul * riposteMul * (bareHanded ? 0.55 : 1);
     const base = { attacker: a.id, victim: v.id, heavy, atk: a.atk, dx: ux, dz: uz, x: (a.x + v.x) / 2, z: (a.z + v.z) / 2 };
 
-    // blocking & parry: defender must be able to block and face the attacker
+    // blocking, parry & Nidhogg flick-parry beat-disarm
     const vst = gearOf(v);
     const canBlock = canBlockOf(v);
     const faceAng = Math.atan2(-dx, -dz) - v.yaw;
     const facing = Math.abs(Math.atan2(Math.sin(faceAng), Math.cos(faceAng))) <= BLOCK_ARC;
-    if (canBlock && v.blocking && v.state === 'idle' && facing) {
+    const nidhoggFlick = hasWeaponOf(v) && v.guardHeight === atkHeight && v.stanceAge <= 0.24;
+    if (v.state === 'idle' && facing && ((canBlock && v.blocking) || (nidhoggFlick && !at.guardBreak && !diveKick))) {
       let armorBroken: ArmorKey | undefined;
-      if (at.guardBreak) {
+      if (!nidhoggFlick && (at.guardBreak || diveKick)) {
         v.blocking = false;
         v.parryHold = 0;
         v.stamina = Math.max(0, v.stamina - 30);
@@ -479,16 +607,23 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
         }
         v.kx += ux * knock; v.kz += uz * knock;
         stagger(v, 0.95);
-        out.push({ ...base, type: 'guardBreak', dmg, zone: 'armL', armorBroken });
-      } else if (v.blockT <= parryWindowOf(v)) {
+        v.dazed = 2.2;
+        out.push({ ...base, type: 'guardBreak', dmg, zone: 'armL', armorBroken, diveKick: diveKick || undefined });
+      } else if ((nidhoggFlick && !at.guardBreak && !diveKick) || (!at.guardBreak && !diveKick && canBlock && v.blocking && v.blockT <= parryWindowOf(v))) {
         stagger(a, 1.35);
+        a.dazed = 2.4;
         a.stamina = Math.max(0, a.stamina - 35);
         a.staminaDelay = 1.2;
         v.stamina = Math.min(v.maxStamina, v.stamina + 25);
         v.riposte = RIPOSTE_WINDOW;
         v.parryCd = 0;
         v.parryHold = 0;
-        out.push({ ...base, type: 'parry', dmg: 0, zone: 'armL' });
+        let weaponDropped = false;
+        if (nidhoggFlick && hasWeaponOf(a)) {
+          a.weaponDisarmed = true;
+          weaponDropped = true;
+        }
+        out.push({ ...base, type: 'parry', dmg: 0, zone: 'armL', weaponDropped: weaponDropped || undefined });
       } else if (heavy && st.heavyBreaksBlock) {
         v.blocking = false;
         v.parryHold = 0;
@@ -502,6 +637,7 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
         }
         v.kx += ux * knock; v.kz += uz * knock;
         stagger(v, 0.95);
+        v.dazed = 2.2;
         out.push({ ...base, type: 'guardBreak', dmg, zone: 'armL', armorBroken });
       } else {
         const chip = dmg * 0.15;
@@ -520,7 +656,7 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
       continue;
     }
 
-    const zone = pickTargetZone(a.atk, v);
+    const zone = pickTargetZone(a.atk, v, atkHeight);
     v.hp -= dmg;
 
     // Armor mitigation & shatter (helm covers head, pauldron covers arms/torso)
@@ -563,17 +699,317 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
       }
     }
 
+    let weaponDropped = false;
+    if (diveKick && hasWeaponOf(v)) {
+      v.weaponDisarmed = true;
+      weaponDropped = true;
+      v.dazed = Math.max(v.dazed, 2.4);
+    }
+
+    let launched = false;
+    let juggled = false;
+    const wasAirborne = v.airY > 0;
+    const isLauncher = (heavy && (a.guardHeight === 'low' || a.weaponDisarmed || v.dazed > 0 || v.state === 'stagger')) || (a.atk === 'light3' && wasAirborne);
+    if (v.hp > 0) {
+      if (wasAirborne && v.juggleCount < 3) {
+        v.airVy = 5.6;
+        v.airY = Math.max(v.airY, 0.25);
+        v.juggleCount++;
+        juggled = true;
+        v.dazed = 2.4;
+      } else if (isLauncher && v.airY === 0) {
+        v.airVy = 7.4;
+        v.airY = 0.12;
+        v.juggleCount = 1;
+        launched = true;
+        v.dazed = 2.6;
+      }
+    }
+
     v.kx += ux * knock; v.kz += uz * knock;
     if (v.hp <= 0) {
-      v.hp = 0; v.state = 'dead'; v.atk = null; v.blocking = false; v.parryHold = 0; v.riposteActive = false;
-      out.push({ ...base, type: 'kill', dmg, zone, broken, severed, decap, armorBroken, snared, riposte: riposteHit || undefined });
+      v.hp = 0; v.state = 'dead'; v.atk = null; v.blocking = false; v.parryHold = 0; v.riposteActive = false; v.dazed = 0; v.airY = 0; v.airVy = 0; v.diveKicking = false;
+      out.push({
+        ...base, type: 'kill', dmg, zone, broken, severed, decap, armorBroken, snared,
+        riposte: riposteHit || undefined, weaponDropped: weaponDropped || undefined, diveKick: diveKick || undefined,
+      });
     } else {
-      stagger(v, broken ? 0.65 : heavy ? 0.45 : at.guardBreak ? 0.35 : 0.18);
-      out.push({ ...base, type: 'hit', dmg, zone, broken, severed, armorBroken, snared, riposte: riposteHit || undefined });
+      stagger(v, launched || juggled ? 0.85 : diveKick ? 0.72 : broken ? 0.65 : heavy ? 0.45 : at.guardBreak ? 0.35 : 0.18);
+      if (broken || severed || armorBroken || riposteHit || diveKick || v.hp <= v.maxHp * 0.32) {
+        v.dazed = 2.6;
+      }
+      out.push({
+        ...base, type: 'hit', dmg, zone, broken, severed, armorBroken, snared,
+        riposte: riposteHit || undefined, weaponDropped: weaponDropped || undefined,
+        launched: launched || undefined, juggled: juggled || undefined, diveKick: diveKick || undefined,
+      });
     }
   }
   a.riposteActive = false;
+  a.diveKicking = false;
   return out;
+}
+
+export interface ArenaWeaponProp {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  yaw: number;
+  spin: number;
+  style: StyleId;
+  gear?: ResolvedGear;
+  color: string;
+  ownerId: number;
+  flying: boolean;
+}
+
+/** Hurl the fighter's weapon straight along their facing line like Nidhogg. */
+export function throwFighterWeapon(a: Fighter, nextId: number): ArenaWeaponProp | null {
+  if (a.state === 'dead' || !hasWeaponOf(a) || a.stamina < 12) return null;
+  a.stamina = Math.max(0, a.stamina - 12);
+  a.staminaDelay = 0.65;
+  a.weaponDisarmed = true;
+  a.blocking = false;
+  a.parryHold = 0;
+  const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw);
+  const startY = a.guardHeight === 'high' ? 1.62 : a.guardHeight === 'low' ? 0.72 : 1.22;
+  return {
+    id: nextId,
+    x: a.x + fx * 0.65,
+    y: startY + a.airY,
+    z: a.z + fz * 0.65,
+    vx: fx * 21,
+    vy: 1.4,
+    vz: fz * 21,
+    yaw: a.yaw,
+    spin: 0,
+    style: a.style,
+    gear: a.gear,
+    color: a.stats.color,
+    ownerId: a.id,
+    flying: true,
+  };
+}
+
+/** Spawn a disarmed weapon prop knocked loose into the air toward `(dx, dz)`. */
+export function spawnDroppedWeapon(v: Fighter, dx: number, dz: number, nextId: number): ArenaWeaponProp {
+  const rx = -dz, rz = dx;
+  return {
+    id: nextId,
+    x: v.x,
+    y: 1.35 + v.airY,
+    z: v.z,
+    vx: dx * 5.2 + rx * 2.4,
+    vy: 5.5,
+    vz: dz * 5.2 + rz * 2.4,
+    yaw: v.yaw,
+    spin: 0,
+    style: v.style,
+    gear: v.gear,
+    color: v.stats.color,
+    ownerId: v.id,
+    flying: false,
+  };
+}
+
+/** Step thrown & fallen weapon props, handling high-duck, jump-hop, flick deflects & floor settling. */
+export function stepWeaponProps(props: ArenaWeaponProp[], fighters: Fighter[], dt: number, maxRadius = 13.5): HitEvent[] {
+  const out: HitEvent[] = [];
+  for (const prop of props) {
+    if (prop.flying) {
+      prop.x += prop.vx * dt;
+      prop.z += prop.vz * dt;
+      prop.vy -= 4.2 * dt;
+      prop.y += prop.vy * dt;
+      prop.spin += 18 * dt;
+
+      const owner = fighters.find((x) => x.id === prop.ownerId);
+      const sp = Math.hypot(prop.vx, prop.vz) || 1;
+      const ux = prop.vx / sp, uz = prop.vz / sp;
+      const propH: StanceHeight = prop.y >= 1.42 ? 'high' : prop.y <= 0.9 ? 'low' : 'mid';
+
+      for (const f of fighters) {
+        if (f.id === prop.ownerId || f.state === 'dead' || f.iframes > 0) continue;
+        if (owner && owner.team === f.team) continue;
+        if (Math.hypot(f.x - prop.x, f.z - prop.z) > f.stats.radius + 0.45) continue;
+
+        if (propH === 'high' && f.guardHeight === 'low' && f.blocking && f.airY === 0) continue;
+        if (propH === 'low' && f.airY > 0.45) continue;
+
+        const nidhoggDeflect = f.state === 'idle' && (
+          (hasWeaponOf(f) && f.guardHeight === propH && f.stanceAge <= 0.24)
+          || (canBlockOf(f) && f.blocking && f.blockT <= parryWindowOf(f))
+        );
+        if (nidhoggDeflect) {
+          prop.vx = -prop.vx * 0.35;
+          prop.vz = -prop.vz * 0.35;
+          prop.vy = 4.2;
+          prop.flying = false;
+          f.riposte = RIPOSTE_WINDOW;
+          out.push({
+            type: 'parry', attacker: prop.ownerId, victim: f.id, dmg: 0, heavy: true, atk: 'heavy',
+            dx: ux, dz: uz, x: prop.x, z: prop.z, zone: 'armL', thrownHit: true,
+          });
+          break;
+        }
+
+        const dmg = 28;
+        f.hp -= dmg;
+        f.kx += ux * 12;
+        f.kz += uz * 12;
+        prop.flying = false;
+        prop.vx *= 0.15;
+        prop.vz *= 0.15;
+        prop.vy = 2.5;
+        const zone: LimbKey = propH === 'high' ? 'head' : propH === 'low' ? 'legL' : 'torso';
+        if (f.hp <= 0) {
+          f.hp = 0; f.state = 'dead'; f.atk = null; f.dazed = 0; f.airY = 0; f.airVy = 0;
+          out.push({
+            type: 'kill', attacker: prop.ownerId, victim: f.id, dmg, heavy: true, atk: 'heavy',
+            dx: ux, dz: uz, x: f.x, z: f.z, zone, thrownHit: true,
+          });
+        } else {
+          stagger(f, 0.75);
+          f.dazed = 2.6;
+          out.push({
+            type: 'hit', attacker: prop.ownerId, victim: f.id, dmg, heavy: true, atk: 'heavy',
+            dx: ux, dz: uz, x: f.x, z: f.z, zone, thrownHit: true,
+          });
+        }
+        break;
+      }
+
+      const r = Math.hypot(prop.x, prop.z);
+      if (r >= maxRadius) {
+        const sc = (maxRadius - 0.3) / r;
+        prop.x *= sc; prop.z *= sc;
+        prop.flying = false;
+        prop.vx = -prop.vx * 0.25;
+        prop.vz = -prop.vz * 0.25;
+        prop.vy = 2;
+      } else if (prop.y <= 0.16) {
+        prop.y = 0.16; prop.vy = 0; prop.vx = 0; prop.vz = 0; prop.flying = false;
+      }
+    } else if (prop.y > 0.16 || Math.abs(prop.vy) > 0.01) {
+      prop.vy -= 18 * dt;
+      prop.x += prop.vx * dt;
+      prop.z += prop.vz * dt;
+      prop.y += prop.vy * dt;
+      prop.spin += 8 * dt;
+      const r = Math.hypot(prop.x, prop.z);
+      if (r >= maxRadius) {
+        const sc = (maxRadius - 0.3) / r;
+        prop.x *= sc; prop.z *= sc;
+        prop.vx *= -0.3; prop.vz *= -0.3;
+      }
+      if (prop.y <= 0.16) {
+        prop.y = 0.16; prop.vy = 0; prop.vx = 0; prop.vz = 0;
+      }
+    }
+  }
+  return out;
+}
+
+/** Pick up the nearest grounded weapon prop when bare-handed (removes it from props). */
+export function tryPickupWeapon(f: Fighter, props: ArenaWeaponProp[], maxDist = 2.2): ArenaWeaponProp | null {
+  if (f.state === 'dead' || isDisarmedOf(f) || !f.weaponDisarmed) return null;
+  let bestIdx = -1;
+  let bestD = maxDist;
+  for (let i = 0; i < props.length; i++) {
+    const pr = props[i];
+    if (pr.flying) continue;
+    const d = Math.hypot(pr.x - f.x, pr.z - f.z);
+    if (d <= bestD) { bestD = d; bestIdx = i; }
+  }
+  if (bestIdx < 0) return null;
+  const picked = props.splice(bestIdx, 1)[0];
+  f.weaponDisarmed = false;
+  return picked;
+}
+
+/** Tekken Colosseum/building Wall-Splat when a staggered victim slams into a boundary under heavy knockback. */
+export function checkWallSplat(f: Fighter, limitRadius: number): boolean {
+  if (f.state !== 'stagger' || f.wallSplat > 0) return false;
+  if (Math.hypot(f.kx, f.kz) > 4.2 && Math.hypot(f.x, f.z) >= limitRadius - 0.15) {
+    f.wallSplat = 1.6;
+    f.dazed = 2.8;
+    f.hp = Math.max(1, f.hp - 8);
+    f.stagger = Math.max(f.stagger, 1.35);
+    return true;
+  }
+  return false;
+}
+
+/** Checks if `v` is currently vulnerable to an `[E]` Execution Finisher. */
+export const canExecuteTarget = (v: Fighter): boolean =>
+  v.state !== 'dead' && (v.dazed > 0 || (v.state === 'stagger' && v.hp <= v.maxHp * 0.38));
+
+/** Perform a visceral `[E]` Execution Finisher on the closest dazed/broken foe within 4.2m, restoring +22% HP & +35 stamina. */
+export function tryExecute(a: Fighter, victims: Fighter[]): HitEvent | null {
+  if (a.state === 'dead' || isDisarmedOf(a)) return null;
+  let target: Fighter | null = null;
+  let bestD = 4.2;
+  for (const v of victims) {
+    if (v.team === a.team || !canExecuteTarget(v)) continue;
+    const d = Math.hypot(v.x - a.x, v.z - a.z);
+    if (d <= bestD) {
+      bestD = d;
+      target = v;
+    }
+  }
+  if (!target) return null;
+
+  const dx = target.x - a.x;
+  const dz = target.z - a.z;
+  const d = Math.hypot(dx, dz) || 1e-6;
+  const ux = dx / d;
+  const uz = dz / d;
+
+  a.x = target.x - ux * 1.2;
+  a.z = target.z - uz * 1.2;
+  a.yaw = Math.atan2(ux, uz);
+  a.state = 'recover';
+  a.atk = 'heavy';
+  a.t = 0;
+  a.blocking = false;
+  a.parryHold = 0;
+  a.riposte = 0;
+  a.riposteActive = false;
+  a.iframes = 0.35;
+  a.hp = Math.min(a.maxHp, a.hp + Math.round(a.maxHp * 0.22));
+  a.stamina = Math.min(a.maxStamina, a.stamina + 35);
+
+  target.hp = 0;
+  target.state = 'dead';
+  target.dazed = 0;
+  target.atk = null;
+  target.blocking = false;
+  target.limbs.head.hp = 0;
+  target.limbs.head.severed = true;
+  target.kx += ux * 16;
+  target.kz += uz * 16;
+
+  return {
+    type: 'kill',
+    attacker: a.id,
+    victim: target.id,
+    dmg: 99,
+    heavy: true,
+    atk: 'heavy',
+    dx: ux,
+    dz: uz,
+    x: target.x,
+    z: target.z,
+    zone: 'head',
+    broken: 'head',
+    severed: 'head',
+    decap: true,
+    riposte: true,
+  };
 }
 
 interface AiStyleProfile {
@@ -623,6 +1059,19 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number, allies?: Fight
   else ai.targetBlockT = Math.max(0, ai.targetBlockT - dt * 1.6);
 
   if (target.state !== 'windup') ai.reactedAtk = false;
+
+  // Nidhogg dynamic High / Mid / Low guard shifting & reactive flick-parry
+  if (target.state === 'windup' && d < reach + 1.4 && f.state === 'idle' && !ai.reactedAtk && Math.random() < prof.parryRate * 0.45) {
+    const incomingH: StanceHeight = target.diveKicking
+      ? 'high'
+      : target.guardHeight !== 'mid'
+        ? target.guardHeight
+        : target.atk === 'heavy' ? 'high' : target.atk === 'light3' || target.atk === 'bash' ? 'low' : 'mid';
+    it.stance = incomingH;
+  } else if (ai.strafeTimer <= 0.04) {
+    const roll = Math.random();
+    it.stance = roll < 0.34 ? 'high' : roll < 0.68 ? 'mid' : 'low';
+  }
 
   // Immediate riposte after a successful AI parry!
   if (f.riposte > 0 && f.state === 'idle' && !disarmed && d < reach + 1.1) {
@@ -776,7 +1225,9 @@ export function aiIntent(f: Fighter, target: Fighter, dt: number, allies?: Fight
     const hvyDist = st.moves.heavy.motion === 'thrust' ? reach + 1.4 : maxStrikeDist;
     const chooseHeavy = r < Math.max(cfg.heavyChance, prof.heavyRate) && d <= hvyDist && f.stamina >= ATTACKS.heavy.stamina;
     const chooseBash = !chooseHeavy && r > 0.88 && d < 2.25 && f.stamina >= ATTACKS.bash.stamina;
-    if (chooseHeavy) {
+    if (f.airY === 0 && prof.agile && r > 0.78 && r <= 0.85 && f.stamina > 30) {
+      it.jump = true;
+    } else if (chooseHeavy) {
       it.heavy = true;
     } else if (chooseBash) {
       it.bash = true;

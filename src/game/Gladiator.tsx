@@ -1,7 +1,7 @@
 import { forwardRef, useRef, useImperativeHandle, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { Atk, LimbKey, State } from './arena/combat';
+import type { Atk, LimbKey, StanceHeight, State } from './arena/combat';
 import { moveOf, type ArmorKey, type MoveMotion, type StyleId } from './arena/styles';
 import { gearFromStyle, type GearVisuals } from './rpg/items';
 import { makeCurvedBasicMaterial } from './art/curvature';
@@ -40,6 +40,18 @@ export interface Pose {
   parryFlash?: number;
   /** riposte empowerment ready/active (0..1) */
   riposte?: number;
+  /** seconds remaining in execution-ready dazed state */
+  dazed?: number;
+  /** Nidhogg high / mid / low guard stance */
+  guardHeight?: StanceHeight;
+  /** true when weapon has been thrown or beat-disarmed */
+  weaponDisarmed?: boolean;
+  /** vertical launch / jump height offset above floor */
+  airY?: number;
+  /** true during airborne flying dive-kick */
+  diveKicking?: boolean;
+  /** seconds remaining in Tekken wall-splat state */
+  wallSplat?: number;
 }
 
 export interface GladiatorHandle { group: THREE.Group; pose: Pose; setMoving: (speed01: number) => void }
@@ -73,6 +85,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
     const helmGroup = useRef<THREE.Group>(null!);
     const pauldronGroup = useRef<THREE.Group>(null!);
     const shieldTrim = useRef<THREE.Group>(null!);
+    const weaponGroupL = useRef<THREE.Group>(null!);
+    const weaponGroupR = useRef<THREE.Group>(null!);
     const snareMesh = useRef<THREE.Mesh>(null!);
     const glintMesh = useRef<THREE.Mesh>(null!);
     const cape0 = useRef<THREE.Group>(null!), cape1 = useRef<THREE.Group>(null!), cape2 = useRef<THREE.Group>(null!);
@@ -143,6 +157,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
       if (helmGroup.current) helmGroup.current.visible = armor?.helm !== false;
       if (pauldronGroup.current) pauldronGroup.current.visible = armor?.pauldron !== false;
       if (shieldTrim.current) shieldTrim.current.visible = armor?.shield !== false;
+      if (weaponGroupL.current) weaponGroupL.current.visible = !p.weaponDisarmed;
+      if (weaponGroupR.current) weaponGroupR.current.visible = !p.weaponDisarmed;
 
       if (snareMesh.current) {
         const snared = (p.snared ?? 0) > 0;
@@ -155,13 +171,18 @@ export const Gladiator = forwardRef<GladiatorHandle, {
 
       if (glintMesh.current) {
         const pf = p.parryFlash ?? 0;
-        const showGlint = pf > 0.05 || p.telegraph > 0.08;
+        const dazed = (p.dazed ?? 0) > 0;
+        const showGlint = dazed || pf > 0.05 || p.telegraph > 0.08;
         glintMesh.current.visible = showGlint;
         if (showGlint) {
-          const s = pf > 0.05
-            ? 1.2 + pf * 1.45 + Math.sin(clock.elapsedTime * 48) * 0.35
-            : 0.65 + p.telegraph * 1.15 + Math.sin(clock.elapsedTime * 36) * 0.25;
-          mats.glint.color.set(pf > 0.05 ? '#ffe780' : '#ff8a5c');
+          const s = dazed
+            ? 1.35 + Math.sin(clock.elapsedTime * 24) * 0.38
+            : pf > 0.05
+              ? 1.2 + pf * 1.45 + Math.sin(clock.elapsedTime * 48) * 0.35
+              : 0.65 + p.telegraph * 1.15 + Math.sin(clock.elapsedTime * 36) * 0.25;
+          mats.glint.color.set(
+            dazed ? (Math.sin(clock.elapsedTime * 18) > 0 ? '#ff3b5c' : '#ffe780') : pf > 0.05 ? '#ffe780' : '#ff8a5c',
+          );
           glintMesh.current.scale.setScalar(s);
           glintMesh.current.rotation.y = clock.elapsedTime * 12;
           glintMesh.current.rotation.z = clock.elapsedTime * 9;
@@ -215,6 +236,17 @@ export const Gladiator = forwardRef<GladiatorHandle, {
       let shRZ = -0.18 - 0.08 * st;
       let elRX = -0.45 - 0.35 * st;
 
+      if (st > 0.3 && p.state === 'idle') {
+        const gh = p.guardHeight ?? 'mid';
+        if (gh === 'high') {
+          shRX -= 0.72; shRZ += 0.12; elRX -= 0.25; upperX -= 0.08;
+          if (v.weapon === 'twinSica') { shLX -= 0.68; shLZ -= 0.12; }
+        } else if (gh === 'low') {
+          pelvisY -= 0.24; kneeLX += 0.38; kneeRX += 0.38; upperX += 0.26; shRX += 0.36;
+          if (v.weapon === 'twinSica') { shLX += 0.34; }
+        }
+      }
+
       const legLBroken = (limbs?.legL.ratio ?? 1) <= 0;
       const legRBroken = (limbs?.legR.ratio ?? 1) <= 0;
       const armRCrippled = (limbs?.armR.ratio ?? 1) <= 0 && !(limbs?.armR.severed);
@@ -244,6 +276,19 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         kneeLX = 1.25 * arc; kneeRX = 1.25 * arc;
         shLX = -0.85; elLX = -1.45;
         shRX = -0.85; elRX = -1.45;
+        blend = 22;
+      } else if (p.diveKicking) {
+        rootPitch = -0.95;
+        hipRX = -1.35; kneeRX = 0.05;
+        hipLX = 0.55; kneeLX = 1.15;
+        shLX = -0.5; shRX = 0.45;
+        blend = 26;
+      } else if ((p.airY ?? 0) > 0.12 && p.state === 'stagger') {
+        rootPitch = -0.75;
+        upperX = -0.35;
+        shLZ = 0.9; shRZ = -0.9;
+        hipLX = -0.55; hipRX = -0.3;
+        kneeLX = 0.8; kneeRX = 0.9;
         blend = 22;
       } else if (p.state === 'stagger') {
         const h = p.hurt;
@@ -479,8 +524,20 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         }
       }
 
-      // Apply smooth damping to every joint
-      root.current.position.y = smooth(root.current.position.y, pelvisY, blend, dt);
+      if ((p.dazed ?? 0) > 0 && p.state === 'idle') {
+        upperX = 0.34;
+        upperZ = Math.sin(clock.elapsedTime * 7.5) * 0.22;
+        headX = 0.3;
+        shLX = -0.18; shRX = -0.18;
+      }
+      if ((p.wallSplat ?? 0) > 0) {
+        upperX = 0.48;
+        headX = 0.35;
+        shLX = -0.25; shRX = -0.25;
+      }
+
+      // Apply smooth damping to every joint (including vertical airY for jumps, dive-kicks & Tekken juggles)
+      root.current.position.y = smooth(root.current.position.y, pelvisY + (p.airY ?? 0), blend, dt);
       root.current.rotation.x = smooth(root.current.rotation.x, rootPitch, blend, dt);
       root.current.rotation.z = smooth(root.current.rotation.z, rootRoll, blend, dt);
 
@@ -541,7 +598,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         if (p.hurt > 0.01) {
           mat.color.lerp(colors.white, p.hurt);
           mat.emissive.lerp(colors.white, p.hurt);
-          mat.emissiveIntensity = Math.max(mat.emissiveIntensity, p.hurt * 0.85);
+          mat.emissiveIntensity = Math.max(mat.emissiveIntensity, p.hurt > 0.35 ? 0.92 : p.hurt * 0.85);
         }
       };
       tint(mats.head, limbs?.head.ratio ?? 1);
@@ -555,7 +612,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
       const rip = p.riposte ?? 0;
       mats.blade.color.copy(colors.white).lerp(colors.warn, p.telegraph).lerp(gold, rip * 0.85);
       mats.blade.emissive.copy(p.telegraph > 0.1 ? colors.warn : rip > 0.1 ? gold : colors.gear);
-      mats.blade.emissiveIntensity = Math.max(0.28 + p.telegraph * 0.8, rip * 0.95);
+      mats.blade.emissiveIntensity = Math.max(0.28 + p.telegraph * 0.8, rip * 1.15);
 
       mats.gearPaint.color.copy(colors.gear).lerp(colors.warn, p.telegraph).lerp(gold, parryStance * 0.7).lerp(colors.white, p.hurt);
       mats.gearPaint.emissive.copy(parryStance > 0.1 ? gold : colors.gear).lerp(colors.warn, p.telegraph);
@@ -790,7 +847,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                   </group>
                 )}
                 {armed && v.weapon === 'twinSica' && (
-                  <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
+                  <group ref={weaponGroupL} position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
                     <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.16, 0.04, 0.06]} /></mesh>
                     <mesh position={[0, -0.36, 0]} material={mats.blade}><boxGeometry args={[0.045, 0.76, 0.065]} /></mesh>
                     <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.blade}><coneGeometry args={[0.05, 0.28, 4]} /></mesh>
@@ -810,43 +867,45 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                 <mesh position={[0, -0.15, 0]} material={mats.armR}><cylinderGeometry args={[0.062, 0.048, 0.30, 5]} /></mesh>
                 <mesh position={[0, -0.22, 0]} material={mats.bronze}><cylinderGeometry args={[0.068, 0.058, 0.14, 5]} /></mesh>
                 <mesh position={[0, -0.32, 0]} material={mats.leather}><boxGeometry args={[0.08, 0.09, 0.09]} /></mesh>
-                {armed && v.weapon === 'gladius' && (
-                  <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
-                    <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.20, 0.045, 0.07]} /></mesh>
-                    <mesh position={[0, -0.44, 0]} material={mats.blade}><boxGeometry args={[0.06, 0.72, 0.075]} /></mesh>
-                    <mesh position={[0, -0.88, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.065, 0.22, 4]} /></mesh>
-                  </group>
-                )}
-                {armed && v.weapon === 'twinSica' && (
-                  <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
-                    <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.16, 0.04, 0.06]} /></mesh>
-                    <mesh position={[0, -0.36, 0]} material={mats.blade}><boxGeometry args={[0.045, 0.76, 0.065]} /></mesh>
-                    <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.blade}><coneGeometry args={[0.05, 0.28, 4]} /></mesh>
-                  </group>
-                )}
-                {armed && v.weapon === 'warhammer' && (
-                  <group position={[0, -0.32, 0]} rotation={[-0.35, 0, 0]}>
-                    <mesh position={[0, -0.58, 0]} material={mats.wood}><cylinderGeometry args={[0.04, 0.04, 1.38, 5]} /></mesh>
-                    <mesh position={[0, -1.24, 0]} material={mats.iron}><boxGeometry args={[0.28, 0.24, 0.48]} /></mesh>
-                    <mesh position={[0, -1.24, 0]} material={mats.gearPaint}><boxGeometry args={[0.31, 0.14, 0.28]} /></mesh>
-                    <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.09, 0.22, 4]} /></mesh>
-                  </group>
-                )}
-                {armed && v.weapon === 'trident' && (
-                  <group position={[0, -0.32, 0]} rotation={[-0.45, 0, 0]}>
-                    <mesh position={[0, -0.52, 0]} material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.56, 5]} /></mesh>
-                    <mesh position={[0, -1.28, 0]} material={mats.bronze}><boxGeometry args={[0.34, 0.06, 0.06]} /></mesh>
-                    {([-0.14, 0, 0.14] as const).map((x) => (
-                      <mesh key={x} position={[x, -1.46, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.045, 0.36, 4]} /></mesh>
-                    ))}
-                  </group>
-                )}
-                {armed && v.weapon === 'spear' && (
-                  <group position={[0, -0.32, 0]} rotation={[-0.48, 0, 0]}>
-                    <mesh position={[0, -0.50, 0]} material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.65, 5]} /></mesh>
-                    <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.085, 0.30, 4]} /></mesh>
-                  </group>
-                )}
+                <group ref={weaponGroupR}>
+                  {armed && v.weapon === 'gladius' && (
+                    <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
+                      <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.20, 0.045, 0.07]} /></mesh>
+                      <mesh position={[0, -0.44, 0]} material={mats.blade}><boxGeometry args={[0.06, 0.72, 0.075]} /></mesh>
+                      <mesh position={[0, -0.88, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.065, 0.22, 4]} /></mesh>
+                    </group>
+                  )}
+                  {armed && v.weapon === 'twinSica' && (
+                    <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
+                      <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.16, 0.04, 0.06]} /></mesh>
+                      <mesh position={[0, -0.36, 0]} material={mats.blade}><boxGeometry args={[0.045, 0.76, 0.065]} /></mesh>
+                      <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.blade}><coneGeometry args={[0.05, 0.28, 4]} /></mesh>
+                    </group>
+                  )}
+                  {armed && v.weapon === 'warhammer' && (
+                    <group position={[0, -0.32, 0]} rotation={[-0.35, 0, 0]}>
+                      <mesh position={[0, -0.58, 0]} material={mats.wood}><cylinderGeometry args={[0.04, 0.04, 1.38, 5]} /></mesh>
+                      <mesh position={[0, -1.24, 0]} material={mats.iron}><boxGeometry args={[0.28, 0.24, 0.48]} /></mesh>
+                      <mesh position={[0, -1.24, 0]} material={mats.gearPaint}><boxGeometry args={[0.31, 0.14, 0.28]} /></mesh>
+                      <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.09, 0.22, 4]} /></mesh>
+                    </group>
+                  )}
+                  {armed && v.weapon === 'trident' && (
+                    <group position={[0, -0.32, 0]} rotation={[-0.45, 0, 0]}>
+                      <mesh position={[0, -0.52, 0]} material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.56, 5]} /></mesh>
+                      <mesh position={[0, -1.28, 0]} material={mats.bronze}><boxGeometry args={[0.34, 0.06, 0.06]} /></mesh>
+                      {([-0.14, 0, 0.14] as const).map((x) => (
+                        <mesh key={x} position={[x, -1.46, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.045, 0.36, 4]} /></mesh>
+                      ))}
+                    </group>
+                  )}
+                  {armed && v.weapon === 'spear' && (
+                    <group position={[0, -0.32, 0]} rotation={[-0.48, 0, 0]}>
+                      <mesh position={[0, -0.50, 0]} material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.65, 5]} /></mesh>
+                      <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.085, 0.30, 4]} /></mesh>
+                    </group>
+                  )}
+                </group>
                 <mesh
                   ref={glintMesh}
                   position={[0, v.weapon === 'warhammer' || v.weapon === 'trident' || v.weapon === 'spear' ? -1.42 : -0.88, 0]}

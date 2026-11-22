@@ -6,6 +6,7 @@ import {
   reputationDeltaForRent, type OwnedPropertyState, type PropertyMode, type RentRate,
 } from './world/properties';
 import { LOOKS } from './arena/run';
+import { type StanceHeight } from './arena/combat';
 import { STYLE_IDS, type StyleId } from './arena/styles';
 import {
   BODIES, CAPES, DEFAULT_LOADOUT, HELMS, OFFHANDS, WEAPONS, resolveLoadout,
@@ -278,6 +279,11 @@ interface GameState extends Save {
   worldPos: { x: number; z: number };
   pendingTeleport: { x: number; z: number; label: string } | null;
   pendingHealFull: boolean;
+  streetLockName: string | null;
+  streetExecuteReady: boolean;
+  streetStance: StanceHeight;
+  streetArmed: boolean;
+  streetCallout: { text: string; color: string; id: number } | null;
   streetVitals: { hp: number; maxHp: number; st: number; maxSt: number };
   setNear: (id: StationId | null) => void;
   openPanel: (id: StationId | null) => void;
@@ -318,6 +324,8 @@ interface GameState extends Save {
   setStreetToast: (toast: Omit<StreetToast, 'id'> | null) => void;
   setNearNpc: (npc: NearNpcHud | null) => void;
   setStreetVitals: (v: { hp: number; maxHp: number; st: number; maxSt: number }) => void;
+  setStreetCombatHud: (t: { lockName: string | null; executeReady: boolean; stance?: StanceHeight; armed?: boolean }) => void;
+  triggerStreetCallout: (text: string, color: string) => void;
   buyAndEquipItem: (slot: GearSlot, id: string) => boolean;
   equipItem: (slot: GearSlot, id: string) => void;
   upgradeStat: (key: StatKey) => boolean;
@@ -435,6 +443,11 @@ export const useGame = create<GameState>((set, get) => {
     worldPos: { x: PLAYER_START.x, z: PLAYER_START.z },
     pendingTeleport: null,
     pendingHealFull: false,
+    streetLockName: null,
+    streetExecuteReady: false,
+    streetStance: 'mid',
+    streetArmed: true,
+    streetCallout: null,
     streetVitals: { hp: 100, maxHp: 100, st: 100, maxSt: 100 },
     setNear: (near) => { if (get().near !== near) set({ near }); },
     openPanel: (panel) => set({ panel, activePropertyId: null, atlasOpen: false }),
@@ -679,6 +692,13 @@ export const useGame = create<GameState>((set, get) => {
     setStreetToast: (toast) => set({ streetToast: toast ? { ...toast, id: ++toastId } : null }),
     setNearNpc: (nearNpc) => set({ nearNpc }),
     setStreetVitals: (streetVitals) => set({ streetVitals }),
+    setStreetCombatHud: ({ lockName, executeReady, stance = 'mid', armed = true }) => {
+      const s = get();
+      if (s.streetLockName !== lockName || s.streetExecuteReady !== executeReady || s.streetStance !== stance || s.streetArmed !== armed) {
+        set({ streetLockName: lockName, streetExecuteReady: executeReady, streetStance: stance, streetArmed: armed });
+      }
+    },
+    triggerStreetCallout: (text, color) => set({ streetCallout: { text, color, id: ++toastId } }),
 
     buyAndEquipItem: (slot, id) => {
       const s = get();

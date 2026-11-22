@@ -31,6 +31,9 @@ export interface CityNpc {
   antagonized: number;
   bountyReward: number;
   respawnT: number;
+  collapseT?: number;
+  collapseDx?: number;
+  collapseDz?: number;
   fighter: Fighter;
 }
 

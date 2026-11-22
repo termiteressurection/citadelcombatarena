@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LimbKey, Limbs } from './combat';
+import type { LimbKey, Limbs, StanceHeight } from './combat';
 
 export type Phase = 'intro' | 'fight' | 'victory' | 'defeat' | 'draft' | 'champion';
 export type LimbHud = Record<LimbKey, { r: number; s: boolean }>;
@@ -37,7 +37,7 @@ interface ArenaHud {
   phase: Phase; bout: number; hp: number; maxHp: number; st: number; maxSt: number;
   playerLimbs: LimbHud; enemies: EnemyBar[];
   boons: string[]; draft: string[]; carryHp: number; carryMax: number; earned: number;
-  lockedName: string | null; combo: number; callout: Callout | null;
+  lockedName: string | null; combo: number; executeReady: boolean; stance: StanceHeight; armed: boolean; callout: Callout | null;
   set: (p: Partial<ArenaHud>) => void;
   startRun: () => void;
   pick: (id: string) => void;
@@ -47,7 +47,7 @@ const fresh = {
   phase: 'intro' as Phase, bout: 1, hp: 100, maxHp: 100, st: 100, maxSt: 100,
   playerLimbs: fullLimbHud(), enemies: [] as EnemyBar[],
   boons: [] as string[], draft: [] as string[], carryHp: 0, carryMax: 0, earned: 0,
-  lockedName: null as string | null, combo: 0, callout: null as Callout | null,
+  lockedName: null as string | null, combo: 0, executeReady: false, stance: 'mid' as StanceHeight, armed: true, callout: null as Callout | null,
 };
 
 export const useArena = create<ArenaHud>((set, get) => ({
