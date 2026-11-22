@@ -52,9 +52,22 @@ describe('deleted-file city NPCs & RDR2 street interactions', () => {
     expect(timid.mood).toBe('fleeing');
   });
 
-  it('triggers unscripted street events near the player', () => {
+  it('keeps Sanctuary plazas calm and triggers outbreaks only outside sanctuaries', () => {
     const pop = createCityPopulation();
-    const outbreak = triggerStreetEvent(pop, 0, 0, 0.95);
+    // Corrupted files stay outside Cache Plaza sanctuary radius (> 72u)
+    for (const c of pop.filter((n) => n.role === 'corrupted')) {
+      expect(Math.hypot(c.x, c.z)).toBeGreaterThan(72);
+    }
+
+    // Inside Cache City Sanctuary (0, 0): never mutates or turns NPCs hostile
+    const calmEvent = triggerStreetEvent(pop, 0, 0, 0.95);
+    expect(calmEvent).not.toBeNull();
+    expect(calmEvent!.title).not.toBe('CORRUPTION OUTBREAK');
+    const calmSpeaker = pop.find((n) => n.id === calmEvent!.npcId)!;
+    expect(calmSpeaker.mood).not.toBe('hostile');
+
+    // Outside Sanctuary on open frontier (260, 0): corruption outbreaks can happen
+    const outbreak = triggerStreetEvent(pop, 260, 0, 0.95);
     expect(outbreak).not.toBeNull();
     expect(outbreak!.title).toBe('CORRUPTION OUTBREAK');
   });

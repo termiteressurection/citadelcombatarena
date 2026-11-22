@@ -3,6 +3,7 @@ import { type StyleId } from '../arena/styles';
 import { gearFromStyle, type ResolvedGear } from '../rpg/items';
 import { isFree } from './colliders';
 import { BOUNDS, SOLIDS } from './layout';
+import { collidersNear, isSanctuaryPosition, WORLD_BOUNDS, type Settlement } from './universe';
 
 export type NpcRole = 'citizen' | 'hustler' | 'gladiator' | 'corrupted' | 'enforcer';
 export type NpcTemperament = 'timid' | 'proud' | 'volatile' | 'helpful' | 'opportunist';
@@ -100,7 +101,7 @@ const ENFORCER_SPECS: { filename: string; style: StyleId }[] = [
 ];
 
 export function pickCityPoint(zone: 'plaza' | 'alley' | 'heap' = 'plaza'): { x: number; z: number } {
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 80; i++) {
     let x = -32 + Math.random() * 64;
     let z = -44 + Math.random() * 84;
     if (zone === 'alley') {
@@ -109,14 +110,15 @@ export function pickCityPoint(zone: 'plaza' | 'alley' | 'heap' = 'plaza'): { x: 
       z = -62 + Math.random() * 116;
     } else if (zone === 'heap') {
       const edge = i % 4;
-      if (edge === 0) { x = -86 + Math.random() * 26; z = -90 + Math.random() * 165; }
-      else if (edge === 1) { x = 60 + Math.random() * 26; z = -90 + Math.random() * 165; }
-      else if (edge === 2) { x = -80 + Math.random() * 160; z = 52 + Math.random() * 28; }
+      if (edge === 0) { x = -86 + Math.random() * 24; z = -90 + Math.random() * 165; }
+      else if (edge === 1) { x = 62 + Math.random() * 24; z = -90 + Math.random() * 165; }
+      else if (edge === 2) { x = -80 + Math.random() * 160; z = 64 + Math.random() * 18; }
       else { x = -80 + Math.random() * 160; z = -98 + Math.random() * 24; }
+      if (Math.hypot(x, z) <= 72) continue;
     }
     if (isFree(x, z, 1.35, SOLIDS, BOUNDS)) return { x, z };
   }
-  return { x: 0, z: 24 };
+  return zone === 'heap' ? { x: 0, z: 76 } : { x: 0, z: 24 };
 }
 
 function buildNpcFighter(
@@ -446,6 +448,13 @@ export function antagonizeNpc(npc: CityNpc, playerArmed: boolean, roll = Math.ra
   };
 }
 
+const SANCTUARY_CHATTER = [
+  'Folks say whoever buys up the Alley Crash-Pads starts pulling Cycles while they sleep.',
+  'See that giant pillar of light over the curve? Always guides strays to the nearest Colosseum.',
+  'Take a Light-Cycle out past the outer towers if you want real danger—downtown is quiet today.',
+  'Rumors say the Kernel Spire holds the truth behind why the machine froze at 99.7%.',
+];
+
 export function triggerStreetEvent(
   npcs: CityNpc[],
   playerX: number,
@@ -456,6 +465,33 @@ export function triggerStreetEvent(
     .filter((n) => n.mood !== 'dead' && n.mood !== 'hostile' && n.role !== 'enforcer')
     .sort((a, b) => Math.hypot(a.x - playerX, a.z - playerZ) - Math.hypot(b.x - playerX, b.z - playerZ));
   if (candidates.length === 0) return null;
+
+  const safe = isSanctuaryPosition(playerX, playerZ);
+  if (safe) {
+    const gladiator = candidates.find((n) => n.role === 'gladiator' && Math.hypot(n.x - playerX, n.z - playerZ) < 42);
+    if (roll < 0.36 && gladiator) {
+      gladiator.bark = 'The Colosseum beacon is singing! Meet me on the Purge Grid if you want a clean match.';
+      gladiator.barkT = 5.5;
+      return {
+        title: 'COLOSSEUM INVITE',
+        npcId: gladiator.id,
+        speaker: gladiator.filename,
+        bark: gladiator.bark,
+        color: '#ffc95c',
+      };
+    }
+    const speaker = candidates.find((n) => n.role === 'citizen') ?? candidates[0];
+    const line = SANCTUARY_CHATTER[Math.floor(roll * 997) % SANCTUARY_CHATTER.length];
+    speaker.bark = line;
+    speaker.barkT = 5.5;
+    return {
+      title: roll < 0.72 ? 'TOWN CHATTER' : 'RUMOR MILL',
+      npcId: speaker.id,
+      speaker: speaker.filename,
+      bark: line,
+      color: '#3ff0ff',
+    };
+  }
 
   const gladiator = candidates.find((n) => n.role === 'gladiator' && Math.hypot(n.x - playerX, n.z - playerZ) < 42);
   if (roll < 0.36 && gladiator) {
@@ -511,4 +547,73 @@ export function triggerStreetEvent(
     bark: target.bark,
     color: '#ff3b5c',
   };
+}
+
+const REGION_STYLES: StyleId[] = ['murmillo', 'hoplomachus', 'dimachaerus', 'retiarius', 'executioner'];
+
+/** Build 8 lightweight themed NPCs around any non-Cache settlement so every town & frontier ruin feels alive. */
+export function createRegionNpcs(s: Settlement): CityNpc[] {
+  const solids = collidersNear(s.x, s.z);
+  const out: CityNpc[] = [];
+  const prefix = s.id.slice(0, 6);
+  const isFrontier = s.safety === 'frontier';
+
+  for (let i = 0; i < 8; i++) {
+    const id = s.seed * 20 + i;
+    let px = s.x + Math.cos(i * 0.8) * 14;
+    let pz = s.z + Math.sin(i * 0.8) * 14;
+    for (let k = 0; k < 24; k++) {
+      const a = ((i + k * 0.37) / 8) * Math.PI * 2;
+      const r = 10 + ((i * 7 + k * 5) % 24);
+      const cx = s.x + Math.cos(a) * r;
+      const cz = s.z + Math.sin(a) * r;
+      if (isFree(cx, cz, 1.1, solids, WORLD_BOUNDS)) {
+        px = cx;
+        pz = cz;
+        break;
+      }
+    }
+
+    const role: NpcRole = isFrontier
+      ? i < 4 ? 'corrupted' : 'gladiator'
+      : i < 4 ? 'citizen' : i < 6 ? 'hustler' : i === 6 ? 'gladiator' : 'enforcer';
+    const style = REGION_STYLES[i % REGION_STYLES.length];
+    const gear = gearFromStyle(style);
+    const filename =
+      role === 'corrupted' ? `${prefix}_err_${i}.bad`
+      : role === 'enforcer' ? `${prefix}_sec.sys`
+      : role === 'gladiator' ? `${prefix}_champ_${i}.exe`
+      : role === 'hustler' ? `${prefix}_deal_${i}.dat`
+      : `${prefix}_mem_${i}.bak`;
+    const color =
+      role === 'corrupted' ? '#ff3b5c'
+      : role === 'enforcer' ? '#ff4f6d'
+      : i % 2 === 0 ? s.accent : s.secondary;
+
+    out.push({
+      id,
+      filename,
+      role,
+      temperament: role === 'corrupted' ? 'volatile' : role === 'hustler' ? 'opportunist' : role === 'citizen' ? 'helpful' : 'proud',
+      mood: role === 'corrupted' ? 'hostile' : 'calm',
+      civilian: role === 'citizen',
+      style,
+      color,
+      gear,
+      x: px,
+      z: pz,
+      yaw: (i * 1.3) % (Math.PI * 2),
+      targetX: px,
+      targetZ: pz,
+      wait: i % 3,
+      bark: '',
+      barkT: 0,
+      greeted: false,
+      antagonized: 0,
+      bountyReward: role === 'corrupted' ? 42 : role === 'gladiator' ? 35 : 15,
+      respawnT: 0,
+      fighter: buildNpcFighter(id, filename, role, style, gear, color, px, pz),
+    });
+  }
+  return out;
 }

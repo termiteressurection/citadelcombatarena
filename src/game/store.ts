@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import type { StationId } from './world/layout';
+import { PLAYER_START, type StationId } from './world/layout';
+import { CAPITALS, COLOSSEUMS, SETTLEMENTS, type CapitalId } from './world/universe';
+import {
+  PROPERTY_BY_ID, discountedCost, propertyRenovateCost, propertyRentPayout, propertySellValue,
+  reputationDeltaForRent, type OwnedPropertyState, type PropertyMode, type RentRate,
+} from './world/properties';
 import { LOOKS } from './arena/run';
 import { STYLE_IDS, type StyleId } from './arena/styles';
 import {
@@ -56,10 +61,20 @@ interface Save {
   style: StyleId;
   ps1Mode: boolean;
   bounty: number;
+  discoveredSettlements: string[];
+  ownedProperties: Record<string, OwnedPropertyState>;
+  reputation: number;
+  lastWorldPos: { x: number; z: number };
+  activeColosseumId: CapitalId;
 }
 
+const KEY_V3 = 'boneyard.save.v3';
 const KEY_V2 = 'boneyard.save.v2';
 const KEY_V1 = 'boneyard.save.v1';
+
+const DEFAULT_CAPITALS = CAPITALS.map((c) => c.id);
+const VALID_SETTLEMENTS = new Set(SETTLEMENTS.map((s) => s.id));
+const VALID_CAPITALS = new Set<string>(CAPITALS.map((c) => c.id));
 
 const blank = (): Save => ({
   day: 1,
@@ -91,6 +106,11 @@ const blank = (): Save => ({
   style: 'murmillo',
   ps1Mode: true,
   bounty: 0,
+  discoveredSettlements: [...DEFAULT_CAPITALS],
+  ownedProperties: {},
+  reputation: 0,
+  lastWorldPos: { x: PLAYER_START.x, z: PLAYER_START.z },
+  activeColosseumId: 'cache_city',
 });
 
 function mergeOwned(base: string[], raw: unknown, validIds: Set<string>): string[] {
@@ -102,10 +122,12 @@ export function loadSave(): Save {
   const b = blank();
   if (typeof localStorage === 'undefined') return b;
   try {
-    const raw2 = localStorage.getItem(KEY_V2);
-    const raw1 = !raw2 ? localStorage.getItem(KEY_V1) : null;
-    if (!raw2 && !raw1) return b;
-    const p = JSON.parse((raw2 ?? raw1)!);
+    const raw3 = localStorage.getItem(KEY_V3);
+    const raw2 = !raw3 ? localStorage.getItem(KEY_V2) : null;
+    const raw1 = !raw3 && !raw2 ? localStorage.getItem(KEY_V1) : null;
+    const raw = raw3 ?? raw2 ?? raw1;
+    if (!raw) return b;
+    const p = JSON.parse(raw);
 
     const lookIds = new Set(LOOKS.map((l) => l.id));
     const unlocks = mergeOwned(['cyan'], p.unlocks, lookIds);
@@ -146,6 +168,25 @@ export function loadSave(): Save {
     const denarii = Number.isFinite(p.denarii) ? Math.max(0, p.denarii) : b.denarii + Math.floor(glory * 0.5);
     const fame = Number.isFinite(p.fame) ? Math.max(0, p.fame) : champions * 80;
 
+    const rawOwnedProps = p.ownedProperties && typeof p.ownedProperties === 'object' ? p.ownedProperties : {};
+    const ownedProperties: Record<string, OwnedPropertyState> = {};
+    for (const [k, val] of Object.entries(rawOwnedProps as Record<string, unknown>)) {
+      if (!PROPERTY_BY_ID.has(k) || !val || typeof val !== 'object') continue;
+      const v = val as Partial<OwnedPropertyState>;
+      ownedProperties[k] = {
+        id: k,
+        mode: v.mode === 'live' ? 'live' : 'rent',
+        rentRate: v.rentRate === 'low' || v.rentRate === 'high' ? v.rentRate : 'fair',
+        tier: v.tier === 2 || v.tier === 3 ? v.tier : 1,
+      };
+    }
+
+    const rawPos = p.lastWorldPos;
+    const lastWorldPos =
+      rawPos && Number.isFinite(rawPos.x) && Number.isFinite(rawPos.z)
+        ? { x: Math.max(-1980, Math.min(1980, rawPos.x)), z: Math.max(-1980, Math.min(1980, rawPos.z)) }
+        : { ...b.lastWorldPos };
+
     return {
       day: Number.isFinite(p.day) ? Math.max(1, p.day) : 1,
       timeOfDay: p.timeOfDay === 'dusk' ? 'dusk' : 'morning',
@@ -176,6 +217,13 @@ export function loadSave(): Save {
       style: typeof p.style === 'string' && validStyles.has(p.style) ? (p.style as StyleId) : 'murmillo',
       ps1Mode: typeof p.ps1Mode === 'boolean' ? p.ps1Mode : true,
       bounty: Number.isFinite(p.bounty) ? Math.max(0, p.bounty) : 0,
+      discoveredSettlements: mergeOwned(DEFAULT_CAPITALS, p.discoveredSettlements, VALID_SETTLEMENTS),
+      ownedProperties,
+      reputation: Number.isFinite(p.reputation) ? Math.max(-100, Math.min(100, p.reputation)) : 0,
+      lastWorldPos,
+      activeColosseumId: typeof p.activeColosseumId === 'string' && VALID_CAPITALS.has(p.activeColosseumId)
+        ? (p.activeColosseumId as CapitalId)
+        : 'cache_city',
     };
   } catch {
     return b;
@@ -200,6 +248,15 @@ export interface StreetToast {
   id: number;
 }
 
+export interface BeaconHud {
+  id: CapitalId;
+  name: string;
+  cityLabel: string;
+  color: string;
+  dist: number;
+  bearing: string;
+}
+
 interface GameState extends Save {
   scene: Scene;
   panel: StationId | null;
@@ -207,10 +264,20 @@ interface GameState extends Save {
   selectedCard: FightCard | null;
   lastResult: BoutOutcome | null;
   weaponDrawn: boolean;
+  onCycle: boolean;
+  atlasOpen: boolean;
   inJail: boolean;
   arrestPrompt: { officerName: string; bounty: number } | null;
   streetToast: StreetToast | null;
   nearNpc: NearNpcHud | null;
+  nearPropertyId: string | null;
+  activePropertyId: string | null;
+  nearColosseumId: CapitalId | null;
+  nearestBeacon: BeaconHud;
+  currentRegionName: string;
+  worldPos: { x: number; z: number };
+  pendingTeleport: { x: number; z: number; label: string } | null;
+  pendingHealFull: boolean;
   streetVitals: { hp: number; maxHp: number; st: number; maxSt: number };
   setNear: (id: StationId | null) => void;
   openPanel: (id: StationId | null) => void;
@@ -218,6 +285,27 @@ interface GameState extends Save {
   togglePs1Mode: () => void;
   setWeaponDrawn: (drawn: boolean) => void;
   toggleWeaponDrawn: () => void;
+  toggleCycle: () => void;
+  setOnCycle: (v: boolean) => void;
+  toggleAtlas: () => void;
+  setAtlasOpen: (v: boolean) => void;
+  discoverSettlement: (id: string) => void;
+  fastTravelTo: (x: number, z: number, label: string) => void;
+  clearPendingTeleport: () => void;
+  setLastWorldPos: (x: number, z: number) => void;
+  openColosseumGate: (id: CapitalId) => void;
+  setNearProperty: (id: string | null) => void;
+  openPropertyPanel: (id: string | null) => void;
+  setNearColosseum: (id: CapitalId | null) => void;
+  setWorldTelemetry: (t: { beacon: BeaconHud; regionName: string; x: number; z: number }) => void;
+  buyProperty: (id: string) => boolean;
+  setPropertyMode: (id: string, mode: PropertyMode) => void;
+  setPropertyRentRate: (id: string, rate: RentRate) => void;
+  renovateProperty: (id: string) => boolean;
+  sellProperty: (id: string) => boolean;
+  collectPropertyRent: () => { total: number; count: number; repDelta: number };
+  healAtProperty: () => void;
+  consumePendingHeal: () => void;
   addBounty: (n: number) => void;
   payBounty: () => boolean;
   openArrestPrompt: (officerName: string) => void;
@@ -306,11 +394,24 @@ export const useGame = create<GameState>((set, get) => {
       style: s.style,
       ps1Mode: s.ps1Mode,
       bounty: s.bounty,
+      discoveredSettlements: s.discoveredSettlements,
+      ownedProperties: s.ownedProperties,
+      reputation: s.reputation,
+      lastWorldPos: s.lastWorldPos,
+      activeColosseumId: s.activeColosseumId,
     };
-    try { localStorage.setItem(KEY_V2, JSON.stringify(payload)); } catch { /* storage unavailable */ }
+    try { localStorage.setItem(KEY_V3, JSON.stringify(payload)); } catch { /* storage unavailable */ }
   };
 
   let toastId = 0;
+  const defaultBeacon: BeaconHud = {
+    id: COLOSSEUMS[0].id,
+    name: COLOSSEUMS[0].name,
+    cityLabel: COLOSSEUMS[0].cityLabel,
+    color: COLOSSEUMS[0].color,
+    dist: 88,
+    bearing: 'N',
+  };
 
   return {
     ...loadSave(),
@@ -320,17 +421,181 @@ export const useGame = create<GameState>((set, get) => {
     selectedCard: null,
     lastResult: null,
     weaponDrawn: false,
+    onCycle: false,
+    atlasOpen: false,
     inJail: false,
     arrestPrompt: null,
     streetToast: null,
     nearNpc: null,
+    nearPropertyId: null,
+    activePropertyId: null,
+    nearColosseumId: null,
+    nearestBeacon: defaultBeacon,
+    currentRegionName: 'CACHE CITY (/DEV/NULL)',
+    worldPos: { x: PLAYER_START.x, z: PLAYER_START.z },
+    pendingTeleport: null,
+    pendingHealFull: false,
     streetVitals: { hp: 100, maxHp: 100, st: 100, maxSt: 100 },
     setNear: (near) => { if (get().near !== near) set({ near }); },
-    openPanel: (panel) => set({ panel }),
-    setScene: (scene) => set({ scene, panel: null, near: null, arrestPrompt: null }),
+    openPanel: (panel) => set({ panel, activePropertyId: null, atlasOpen: false }),
+    setScene: (scene) => set({ scene, panel: null, near: null, arrestPrompt: null, activePropertyId: null, atlasOpen: false, onCycle: false }),
     togglePs1Mode: () => { set({ ps1Mode: !get().ps1Mode }); save(); },
-    setWeaponDrawn: (weaponDrawn) => set({ weaponDrawn }),
-    toggleWeaponDrawn: () => set({ weaponDrawn: !get().weaponDrawn }),
+    setWeaponDrawn: (weaponDrawn) => set((s) => ({ weaponDrawn, onCycle: weaponDrawn ? false : s.onCycle })),
+    toggleWeaponDrawn: () => set((s) => {
+      const next = !s.weaponDrawn;
+      return { weaponDrawn: next, onCycle: next ? false : s.onCycle };
+    }),
+    toggleCycle: () => {
+      const s = get();
+      if (s.inJail) return;
+      const next = !s.onCycle;
+      set({ onCycle: next, weaponDrawn: next ? false : s.weaponDrawn });
+    },
+    setOnCycle: (v) => set((s) => ({ onCycle: v, weaponDrawn: v ? false : s.weaponDrawn })),
+    toggleAtlas: () => set((s) => {
+      const next = !s.atlasOpen;
+      return { atlasOpen: next, panel: null, activePropertyId: null };
+    }),
+    setAtlasOpen: (v) => set({ atlasOpen: v, panel: null, activePropertyId: null }),
+    discoverSettlement: (id) => {
+      const s = get();
+      if (!VALID_SETTLEMENTS.has(id) || s.discoveredSettlements.includes(id)) return;
+      const found = SETTLEMENTS.find((x) => x.id === id);
+      set({
+        discoveredSettlements: [...s.discoveredSettlements, id],
+        streetToast: found
+          ? { speaker: 'SECTOR DISCOVERED', text: `${found.name} (${found.code}) added to your World Atlas!`, color: found.accent, id: ++toastId }
+          : s.streetToast,
+      });
+      save();
+    },
+    fastTravelTo: (x, z, label) => {
+      const clampedX = Math.max(-1980, Math.min(1980, x));
+      const clampedZ = Math.max(-1980, Math.min(1980, z));
+      set({
+        pendingTeleport: { x: clampedX, z: clampedZ, label },
+        lastWorldPos: { x: clampedX, z: clampedZ },
+        atlasOpen: false,
+        panel: null,
+        activePropertyId: null,
+        arrestPrompt: null,
+        inJail: false,
+        weaponDrawn: false,
+        streetToast: { speaker: 'FAST TRAVEL', text: `Warped cleanly to ${label}.`, color: '#3ff0ff', id: ++toastId },
+      });
+      save();
+    },
+    clearPendingTeleport: () => set({ pendingTeleport: null }),
+    setLastWorldPos: (x, z) => {
+      set({ lastWorldPos: { x, z } });
+      save();
+    },
+    openColosseumGate: (id) => {
+      set({ activeColosseumId: id, panel: 'gate', activePropertyId: null, atlasOpen: false });
+      save();
+    },
+    setNearProperty: (nearPropertyId) => { if (get().nearPropertyId !== nearPropertyId) set({ nearPropertyId }); },
+    openPropertyPanel: (activePropertyId) => set({ activePropertyId, panel: null, atlasOpen: false }),
+    setNearColosseum: (nearColosseumId) => { if (get().nearColosseumId !== nearColosseumId) set({ nearColosseumId }); },
+    setWorldTelemetry: ({ beacon, regionName, x, z }) => set({ nearestBeacon: beacon, currentRegionName: regionName, worldPos: { x, z } }),
+    buyProperty: (id) => {
+      const s = get();
+      const def = PROPERTY_BY_ID.get(id);
+      if (!def || s.ownedProperties[id] || s.denarii < def.price) return false;
+      const next: OwnedPropertyState = { id, mode: 'rent', rentRate: 'fair', tier: 1 };
+      set({
+        denarii: s.denarii - def.price,
+        ownedProperties: { ...s.ownedProperties, [id]: next },
+        reputation: Math.min(100, s.reputation + 4),
+        streetToast: { speaker: 'DEED ACQUIRED', text: `You now own ${def.name} in ${def.settlementName}!`, color: '#ffc95c', id: ++toastId },
+      });
+      save();
+      return true;
+    },
+    setPropertyMode: (id, mode) => {
+      const s = get();
+      const cur = s.ownedProperties[id];
+      if (!cur || cur.mode === mode) return;
+      set({ ownedProperties: { ...s.ownedProperties, [id]: { ...cur, mode } } });
+      save();
+    },
+    setPropertyRentRate: (id, rentRate) => {
+      const s = get();
+      const cur = s.ownedProperties[id];
+      if (!cur || cur.rentRate === rentRate) return;
+      set({ ownedProperties: { ...s.ownedProperties, [id]: { ...cur, rentRate } } });
+      save();
+    },
+    renovateProperty: (id) => {
+      const s = get();
+      const def = PROPERTY_BY_ID.get(id);
+      const cur = s.ownedProperties[id];
+      if (!def || !cur || cur.tier >= 3) return false;
+      const cost = propertyRenovateCost(def, cur.tier);
+      if (s.denarii < cost) return false;
+      const nextTier = (cur.tier + 1) as 2 | 3;
+      set({
+        denarii: s.denarii - cost,
+        ownedProperties: { ...s.ownedProperties, [id]: { ...cur, tier: nextTier } },
+        reputation: Math.min(100, s.reputation + 5),
+        streetToast: { speaker: 'RENOVATED', text: `${def.name} upgraded to Tier ${nextTier}!`, color: '#4dffa0', id: ++toastId },
+      });
+      save();
+      return true;
+    },
+    sellProperty: (id) => {
+      const s = get();
+      const def = PROPERTY_BY_ID.get(id);
+      const cur = s.ownedProperties[id];
+      if (!def || !cur) return false;
+      const value = propertySellValue(def, cur);
+      const nextOwned = { ...s.ownedProperties };
+      delete nextOwned[id];
+      set({
+        denarii: s.denarii + value,
+        ownedProperties: nextOwned,
+        activePropertyId: s.activePropertyId === id ? null : s.activePropertyId,
+        streetToast: { speaker: 'DEED SOLD', text: `Sold ${def.name} for ${value} Cycles.`, color: '#ffc95c', id: ++toastId },
+      });
+      save();
+      return true;
+    },
+    collectPropertyRent: () => {
+      const s = get();
+      let total = 0;
+      let count = 0;
+      let repDelta = 0;
+      for (const owned of Object.values(s.ownedProperties)) {
+        const def = PROPERTY_BY_ID.get(owned.id);
+        if (!def) continue;
+        const pay = propertyRentPayout(def, owned);
+        if (pay > 0) {
+          total += pay;
+          count += 1;
+          repDelta += reputationDeltaForRent(owned);
+        }
+      }
+      if (total <= 0) return { total: 0, count: 0, repDelta: 0 };
+      set({
+        denarii: s.denarii + total,
+        reputation: Math.max(-100, Math.min(100, s.reputation + repDelta)),
+        streetToast: {
+          speaker: 'REAL ESTATE INCOME',
+          text: `+${total} Cycles collected from ${count} rented propert${count === 1 ? 'y' : 'ies'}.`,
+          color: '#ffc95c',
+          id: ++toastId,
+        },
+      });
+      save();
+      return { total, count, repDelta };
+    },
+    healAtProperty: () => {
+      set({
+        pendingHealFull: true,
+        streetToast: { speaker: 'HOME SANCTUARY', text: 'Integrity & runtime fully restored in your private quarters.', color: '#4dffa0', id: ++toastId },
+      });
+    },
+    consumePendingHeal: () => set({ pendingHealFull: false }),
     addBounty: (n) => {
       if (n <= 0) return;
       set({ bounty: get().bounty + Math.round(n) });
@@ -427,9 +692,10 @@ export const useGame = create<GameState>((set, get) => {
         save();
         return true;
       }
-      if (s.fame < item.reqFame || s.denarii < item.cost) return false;
+      const price = discountedCost(item.cost, s.ownedProperties);
+      if (s.fame < item.reqFame || s.denarii < price) return false;
       set({
-        denarii: s.denarii - item.cost,
+        denarii: s.denarii - price,
         [oKey]: [...owned, id],
         loadout: { ...s.loadout, [lKey]: id },
       } as Partial<GameState>);
@@ -459,14 +725,16 @@ export const useGame = create<GameState>((set, get) => {
     buyConsumable: (id) => {
       const s = get();
       const c = CONSUMABLES.find((x) => x.id === id);
-      if (!c || s.denarii < c.cost) return false;
+      if (!c) return false;
+      const price = discountedCost(c.cost, s.ownedProperties);
+      if (s.denarii < price) return false;
       if (c.id === 'healing_flask') {
         if (s.flasks >= MAX_FLASKS) return false;
-        set({ denarii: s.denarii - c.cost, flasks: s.flasks + 1 });
+        set({ denarii: s.denarii - price, flasks: s.flasks + 1 });
       } else {
         const buffId = c.id as DailyBuffId;
         if (s.dailyBuffs.includes(buffId)) return false;
-        set({ denarii: s.denarii - c.cost, dailyBuffs: [...s.dailyBuffs, buffId] });
+        set({ denarii: s.denarii - price, dailyBuffs: [...s.dailyBuffs, buffId] });
       }
       save();
       return true;
@@ -531,11 +799,22 @@ export const useGame = create<GameState>((set, get) => {
         trainedToday: false,
         lastResult: null,
       });
+      get().collectPropertyRent();
       save();
     },
 
     startCardBout: (card) => {
-      set({ selectedCard: card, lastResult: null, scene: 'arena', panel: null, near: null });
+      set({
+        selectedCard: card,
+        lastResult: null,
+        scene: 'arena',
+        panel: null,
+        near: null,
+        activePropertyId: null,
+        atlasOpen: false,
+        onCycle: false,
+      });
+      save();
     },
 
     settleBout: (summary) => {

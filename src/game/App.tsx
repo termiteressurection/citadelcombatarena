@@ -19,7 +19,7 @@ export function App() {
   const scene = useGame((s) => s.scene);
   return (
     <>
-      <Canvas camera={{ position: [0, 4.95, 35.2], fov: 66, near: 0.1, far: 800 }} dpr={[1, 1.5]} gl={{ antialias: false }}>
+      <Canvas camera={{ position: [0, 4.95, 35.2], fov: 66, near: 0.1, far: 1200 }} dpr={[1, 1.5]} gl={{ antialias: false }}>
         <Ps1Resolution />
         {scene === 'ludus' && <Ludus />}
         {scene === 'arena' && <Arena />}

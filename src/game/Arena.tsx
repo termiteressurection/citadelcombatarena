@@ -20,6 +20,7 @@ import { STYLE_IDS, styleOf, type ArmorKey, type StyleId } from './arena/styles'
 import { gearFromStyle, itemById, resolveLoadout, WEAPONS, type WeaponFamily } from './rpg/items';
 import { buildPlayerMods } from './rpg/stats';
 import type { FightCard } from './rpg/quests';
+import { COLOSSEUMS, type CapitalId } from './world/universe';
 import { keys, pressed } from './input';
 import { useGame } from './store';
 
@@ -712,7 +713,15 @@ function Ring() {
 
 const CROWD_COLORS = ['#3ff0ff', '#ff4fd8', '#ffc95c', '#a78bfa', '#4dffa0'];
 
-function Stands({ w }: { w: ArenaWorld }) {
+const ARENA_THEME: Record<CapitalId, { bg: string; fog: string; hemi: string; key: string; fill: string; brazier: string }> = {
+  cache_city: { bg: '#0d0919', fog: '#170f26', hemi: '#8e82c8', key: '#ffd8a6', fill: '#68c6ff', brazier: '#3ff0ff' },
+  drift_bazaars: { bg: '#180d07', fog: '#28150b', hemi: '#ffb86c', key: '#ffd280', fill: '#ff8a3d', brazier: '#ffc95c' },
+  cold_vaults: { bg: '#090b1d', fog: '#121636', hemi: '#b7b0ff', key: '#eef4ff', fill: '#a78bfa', brazier: '#a78bfa' },
+  rust_citadel: { bg: '#19060b', fog: '#2a0912', hemi: '#ff6b7a', key: '#ff9c78', fill: '#ff3b5c', brazier: '#ff3b5c' },
+  kernel_spire: { bg: '#120f08', fog: '#221c0d', hemi: '#ffe699', key: '#fff7db', fill: '#ffd866', brazier: '#ffd866' },
+};
+
+function Stands({ w, accentColor }: { w: ArenaWorld; accentColor: string }) {
   const mats = useMemo(() => {
     const stoneTierTex = cloneTex(getPs1Texture('circuit'), 20, 3);
     const stonePierTex = cloneTex(getPs1Texture('conduit'), 2, 4);
@@ -861,7 +870,7 @@ function Stands({ w }: { w: ArenaWorld }) {
 
       {/* 8 Podium Braziers (2 cast warm firelight on the sand) */}
       {braziers.map((pos, i) => (
-        <Brazier key={i} position={pos} scale={0.95} light={i === 0 || i === 4} />
+        <Brazier key={i} position={pos} scale={0.95} light={i === 0 || i === 4} color={accentColor} />
       ))}
 
       {/* Instanced Low-Poly Cheering Spectators */}
@@ -877,6 +886,9 @@ function Stands({ w }: { w: ArenaWorld }) {
 
 function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
   const camera = useThree((s) => s.camera);
+  const activeColosseumId = useGame((s) => s.activeColosseumId);
+  const col = COLOSSEUMS.find((c) => c.id === activeColosseumId) ?? COLOSSEUMS[0];
+  const theme = ARENA_THEME[col.id] ?? ARENA_THEME.cache_city;
   const shardMesh = useRef<THREE.InstancedMesh>(null!);
   const [ragVer, setRagVer] = useState(0);
   const [debVer, setDebVer] = useState(0);
@@ -1042,15 +1054,15 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
 
   return (
     <>
-      <color attach="background" args={['#0d0919']} />
-      <fog attach="fog" args={['#170f26', 24, 96]} />
-      <hemisphereLight args={['#8e82c8', '#382218', 0.95]} />
-      <directionalLight position={[18, 30, 14]} intensity={1.35} color="#ffd8a6" />
-      <directionalLight position={[-18, 14, -20]} intensity={0.45} color="#68c6ff" />
+      <color attach="background" args={[theme.bg]} />
+      <fog attach="fog" args={[theme.fog, 24, 96]} />
+      <hemisphereLight args={[theme.hemi, '#382218', 0.95]} />
+      <directionalLight position={[18, 30, 14]} intensity={1.35} color={theme.key} />
+      <directionalLight position={[-18, 14, -20]} intensity={0.45} color={theme.fill} />
       <Ps1Sky mood="arena" />
       <Starfield playerPosRef={playerPos} />
       <Ring />
-      <Stands w={w} />
+      <Stands w={w} accentColor={theme.brazier} />
       <TargetReticle w={w} />
       {w.fighters.map((f, i) => <FighterView key={f.id} w={w} index={i} />)}
       <SlashRibbons pool={w.slashes} />

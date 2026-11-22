@@ -5,6 +5,7 @@ import { Gladiator, type GladiatorHandle, type LimbPose } from './Gladiator';
 import { Stations } from './Stations';
 import { StaticBatch } from './art/StaticBatch';
 import { Brazier, Ps1Sky } from './art/Ps1Sky';
+import { LightCycle, type CycleRenderState } from './art/LightCycle';
 import { CITY_CURVE_RADIUS, makeCurvedBasicMaterial, setCurvature } from './art/curvature';
 import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import { SurrealSpores } from './art/SurrealSpores';
@@ -23,11 +24,17 @@ import { buildPlayerMods } from './rpg/stats';
 import { resolveLoadout } from './rpg/items';
 import { clampBounds, resolveCircles } from './world/colliders';
 import {
-  AQUEDUCT_PIERS, AQUEDUCT_YAW, BASIN, BOUNDS, CITY_TOWERS, COLUMNS, JAIL_CELL,
-  PLAYER_START, SOLIDS, nearestStation,
+  AQUEDUCT_PIERS, AQUEDUCT_YAW, BASIN, CITY_TOWERS, COLUMNS, JAIL_CELL,
+  nearestStation,
 } from './world/layout';
 import {
-  antagonizeNpc, createCityPopulation, greetNpc, pickCityPoint, triggerStreetEvent,
+  biomeAt, collidersNear, isSanctuaryPosition, nearestColosseum, nearestSettlement,
+  nearestSettlementTerminal, nearestWorldColosseumGate, regionDisplayName, WORLD_BOUNDS,
+} from './world/universe';
+import { nearestPropertyDeed } from './world/properties';
+import { InfiniteCurvedFloor, NearestColosseumBeacon, StreamingSettlements } from './world/WorldRenderer';
+import {
+  antagonizeNpc, createCityPopulation, createRegionNpcs, greetNpc, pickCityPoint, triggerStreetEvent,
   type CityNpc,
 } from './world/citizens';
 import { keys, pressed } from './input';
@@ -35,6 +42,8 @@ import { useGame } from './store';
 
 const PLAYER_R = 0.55;
 const MOVE_SPEED = 0.27 * 60;
+const CYCLE_SPEED = 46;
+const CYCLE_TURBO_SPEED = 68;
 const KB_YAW_SENS = 0.06;
 const CAMERA_SOCKET_DISTANCE = 5.6;
 const CAMERA_SOCKET_HEIGHT = 3.55;
@@ -65,7 +74,6 @@ function NeonCityFloor() {
     const waterTex = cloneTex(getPs1Texture('water'), 2, 4);
     const waterMat = makePs1Material({ color: '#ffffff', map: waterTex, emissive: '#22c8e8', emissiveIntensity: 0.65 });
     return {
-      outerGrid: makePs1Material({ color: '#8ad8f0', map: cloneTex(getPs1Texture('grid'), 76, 76), emissive: '#071b2b', emissiveIntensity: 0.35 }),
       plaza: makePs1Material({ color: '#a8e6ff', map: cloneTex(getPs1Texture('grid'), 22, 22), emissive: '#0c273b', emissiveIntensity: 0.4 }),
       avenue: makePs1Material({ color: '#6fd8ff', map: cloneTex(getPs1Texture('conduit'), 2, 28), emissive: '#0e324a', emissiveIntensity: 0.4 }),
       cross: makePs1Material({ color: '#5fb6e8', map: cloneTex(getPs1Texture('conduit'), 16, 1), emissive: '#0c263a', emissiveIntensity: 0.35 }),
@@ -75,7 +83,6 @@ function NeonCityFloor() {
       gold: makePs1Material({ color: '#ffd480', map: getPs1Texture('bronze'), emissive: '#785212', emissiveIntensity: 0.35 }),
       water: waterMat,
       waterTex,
-      abyss: new THREE.MeshBasicMaterial({ color: '#03030a' }),
     };
   }, []);
 
@@ -90,14 +97,6 @@ function NeonCityFloor() {
 
   return (
     <group>
-      {/* Distant dark digital void below horizon drop */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -45, 0]} material={mats.abyss} frustumCulled={false}>
-        <circleGeometry args={[480, 24]} />
-      </mesh>
-      {/* Continuous subdivided open TRON Grid extending smoothly over the R=200 horizon */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, -10]} material={mats.outerGrid} frustumCulled={false}>
-        <planeGeometry args={[280, 280, 76, 76]} />
-      </mesh>
       {/* Central Cache Plaza Market Floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, -4]} material={mats.plaza} frustumCulled={false}>
         <planeGeometry args={[76, 82, 24, 24]} />
@@ -391,10 +390,11 @@ function NpcActor({ npc }: { npc: CityNpc }) {
   );
 }
 
-/** Interactive Curved TRON Megacity simulation: Player + 26 Unpredictable Living Deleted-File NPCs + SysWatch Law + Live Street Combat. */
+/** Interactive Curved R=200 TRON Continent simulation: Player + Light-Cycle + Living Towns + Sky Beacon + Properties. */
 function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
   const g = useRef<GladiatorHandle>(null!);
   const shardMesh = useRef<THREE.InstancedMesh>(null!);
+  const cacheNpcGroup = useRef<THREE.Group>(null!);
   const limbPose = useRef<LimbPose>(makeLimbPose());
   const armorPose = useRef<Record<ArmorKey, boolean>>({ helm: true, pauldron: true, shield: true });
 
@@ -408,7 +408,20 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
   const inJail = useGame((s) => s.inJail);
 
   const playerGear = useMemo(() => resolveLoadout(loadout), [loadout]);
-  const npcs = useMemo(() => createCityPopulation(), []);
+  const cacheNpcs = useMemo(() => createCityPopulation(), []);
+  const [regionNpcs, setRegionNpcs] = useState<{ settlementId: string | null; x: number; z: number; list: CityNpc[] }>({
+    settlementId: null,
+    x: 0,
+    z: 0,
+    list: [],
+  });
+  const regionRef = useRef(regionNpcs);
+  regionRef.current = regionNpcs;
+
+  const cycleState = useRef<CycleRenderState>({
+    active: false, x: 0, z: 34, yaw: 0, lean: 0, speed: 0, turbo: false,
+  });
+
   const fx = useMemo(() => ({
     shards: new ShardPool(),
     slashes: new SlashPool(),
@@ -426,31 +439,41 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     dLook: THREE.Vector3;
     buf: { light: number; heavy: number; bash: number; dodge: number; parry: number };
     eventTimer: number;
+    rentTimer: number;
+    discoveryTick: number;
     resistUntil: number;
     wasInJail: boolean;
     wasArrestOpen: boolean;
     vitalsTick: number;
+    cycleSpeed: number;
     time: number;
   }>(null!);
 
   if (!sim.current) {
+    const start = useGame.getState().lastWorldPos;
     const mods = buildPlayerMods(stats, playerGear, dailyBuffs);
-    const p = makeFighter(0, 'player', PLAYER_START.x, PLAYER_START.z, mods, style, playerGear);
+    const p = makeFighter(0, 'player', start.x, start.z, mods, style, playerGear);
     p.stats = { ...p.stats, color: lookColor(look) };
+    playerPos.current.set(start.x, 0, start.z);
+    cycleState.current.x = start.x;
+    cycleState.current.z = start.z;
     sim.current = {
       player: p,
       yaw: 0,
       pitch: 0,
-      cam: new THREE.Vector3(PLAYER_START.x, EYE_Y + CAMERA_SOCKET_HEIGHT, PLAYER_START.z + CAMERA_SOCKET_DISTANCE),
-      lookAt: new THREE.Vector3(PLAYER_START.x, EYE_Y + CAMERA_LOOK_HEIGHT, PLAYER_START.z - CAMERA_LOOK_AHEAD),
+      cam: new THREE.Vector3(start.x, EYE_Y + CAMERA_SOCKET_HEIGHT, start.z + CAMERA_SOCKET_DISTANCE),
+      lookAt: new THREE.Vector3(start.x, EYE_Y + CAMERA_LOOK_HEIGHT, start.z - CAMERA_LOOK_AHEAD),
       dCam: new THREE.Vector3(),
       dLook: new THREE.Vector3(),
       buf: { light: 0, heavy: 0, bash: 0, dodge: 0, parry: 0 },
       eventTimer: 16,
+      rentTimer: 45,
+      discoveryTick: 0,
       resistUntil: 0,
       wasInJail: false,
       wasArrestOpen: false,
       vitalsTick: 0,
+      cycleSpeed: 0,
       time: 0,
     };
   }
@@ -468,11 +491,17 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     s.player = next;
   }, [playerGear, stats, dailyBuffs, look, style]);
 
-  // Reset global horizon curvature when leaving the city scene
+  // Reset global horizon curvature & camera FOV when leaving open-world scene
   useEffect(() => {
     setCurvature(CITY_CURVE_RADIUS, playerPos.current.x, playerPos.current.z);
-    return () => setCurvature(0, 0, 0);
-  }, [playerPos]);
+    return () => {
+      setCurvature(0, 0, 0);
+      if (camera instanceof THREE.PerspectiveCamera && camera.fov !== 66) {
+        camera.fov = 66;
+        camera.updateProjectionMatrix();
+      }
+    };
+  }, [playerPos, camera]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -481,32 +510,77 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     const p = s.player;
     s.time += dt;
 
+    // Handle Fast-Travel / World Teleport
+    if (game.pendingTeleport) {
+      const tp = game.pendingTeleport;
+      p.x = tp.x;
+      p.z = tp.z;
+      p.vx = 0;
+      p.vz = 0;
+      p.state = 'idle';
+      s.cycleSpeed = 0;
+      const fxDirSnap = -Math.sin(s.yaw);
+      const fzDirSnap = -Math.cos(s.yaw);
+      s.cam.set(p.x - fxDirSnap * CAMERA_SOCKET_DISTANCE, EYE_Y + CAMERA_SOCKET_HEIGHT, p.z - fzDirSnap * CAMERA_SOCKET_DISTANCE);
+      s.lookAt.set(p.x + fxDirSnap * CAMERA_LOOK_AHEAD, EYE_Y + CAMERA_LOOK_HEIGHT, p.z + fzDirSnap * CAMERA_LOOK_AHEAD);
+      playerPos.current.set(p.x, 0, p.z);
+      setCurvature(CITY_CURVE_RADIUS, p.x, p.z);
+      fx.shards.burst(p.x, 1.4, p.z, 24, 9, '#3ff0ff');
+      game.clearPendingTeleport();
+    }
+
+    // Handle Home Sanctuary Heal
+    if (game.pendingHealFull) {
+      p.hp = p.maxHp;
+      p.stamina = p.maxStamina;
+      for (const k of LIMB_KEYS) { p.limbs[k].hp = p.limbs[k].max; p.limbs[k].severed = false; }
+      p.armor.helm.hp = p.armor.helm.max; p.armor.helm.broken = p.armor.helm.max <= 0;
+      p.armor.pauldron.hp = p.armor.pauldron.max; p.armor.pauldron.broken = p.armor.pauldron.max <= 0;
+      p.armor.shield.hp = p.armor.shield.max; p.armor.shield.broken = p.armor.shield.max <= 0;
+      fx.shards.burst(p.x, 1.35, p.z, 22, 7.5, '#4dffa0');
+      game.consumePendingHeal();
+    }
+
+    const activeNpcs = Math.hypot(p.x, p.z) < 185 ? cacheNpcs : regionRef.current.list;
+    if (cacheNpcGroup.current) cacheNpcGroup.current.visible = Math.hypot(p.x, p.z) < 185;
+
     // Handle Quarantine transitions
     if (game.inJail && !s.wasInJail) {
       p.x = JAIL_CELL.x;
       p.z = JAIL_CELL.z;
       p.state = 'idle';
-      for (const n of npcs) if (n.role === 'enforcer') n.mood = 'calm';
+      game.setOnCycle(false);
+      for (const n of cacheNpcs) if (n.role === 'enforcer') n.mood = 'calm';
     }
     s.wasInJail = game.inJail;
 
     // Detect Resist Arrest (arrestPrompt dismissed without going to jail and bounty still > 0)
     if (s.wasArrestOpen && !game.arrestPrompt && !game.inJail && game.bounty > 0) {
       s.resistUntil = s.time + 14;
-      for (const n of npcs) {
+      for (const n of activeNpcs) {
         if (n.role === 'enforcer' && Math.hypot(n.x - p.x, n.z - p.z) < 28) n.mood = 'hostile';
       }
       game.setStreetToast({ speaker: 'SysWatch', text: 'SUSPECT RESISTING DELETION! ENGAGE FORCE!', color: '#ff3b5c' });
     }
     s.wasArrestOpen = Boolean(game.arrestPrompt);
 
-    const frozen = game.panel !== null || game.arrestPrompt !== null;
-
-    if (game.panel && pressed('Escape')) game.openPanel(null);
+    // Panel / Modal Toggles ([ESC], [C], [M], [V], [X])
+    if (pressed('Escape')) {
+      if (game.activePropertyId) game.openPropertyPanel(null);
+      else if (game.atlasOpen) game.setAtlasOpen(false);
+      else if (game.panel) game.openPanel(null);
+    }
     if (!game.arrestPrompt && pressed('KeyC')) {
       if (game.panel === 'locker') game.openPanel(null);
-      else if (game.panel === null) game.openPanel('locker');
+      else if (!game.panel && !game.atlasOpen && !game.activePropertyId) game.openPanel('locker');
     }
+    if (!game.arrestPrompt && pressed('KeyM')) {
+      if (game.atlasOpen) game.setAtlasOpen(false);
+      else if (!game.panel && !game.activePropertyId) game.setAtlasOpen(true);
+    }
+
+    const frozen = game.panel !== null || game.arrestPrompt !== null || game.atlasOpen || game.activePropertyId !== null;
+    if (!frozen && pressed('KeyV')) game.toggleCycle();
     if (!frozen && pressed('KeyX')) game.toggleWeaponDrawn();
 
     // Camera Q/E orbit & R/F tilt
@@ -534,7 +608,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         b.heavy = 0.2;
       }
       if (game.weaponDrawn && pressed('KeyF')) b.bash = 0.2;
-      if (pressed('Space')) b.dodge = 0.16;
+      if (!game.onCycle && pressed('Space')) b.dodge = 0.16;
       if (game.weaponDrawn && (pressed('ShiftLeft') || pressed('ShiftRight') || pressed('KeyL'))) b.parry = 0.16;
       if (pressed('KeyH') && game.flasks > 0 && drinkFlask(p)) {
         game.consumeFlaskInBout();
@@ -546,13 +620,13 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     // Nearest NPC discovery for RDR2 [T] Greet / [G] Antagonize
     let closestNpc: CityNpc | null = null;
     let closestDist = 4.6;
-    for (const n of npcs) {
+    for (const n of activeNpcs) {
       if (n.mood === 'dead') continue;
       const d = Math.hypot(n.x - p.x, n.z - p.z);
       if (d < closestDist) { closestDist = d; closestNpc = n; }
     }
 
-    if (!frozen && closestNpc) {
+    if (!frozen && !game.onCycle && closestNpc) {
       if (pressed('KeyT')) {
         const out = greetNpc(closestNpc, game.fame);
         closestNpc.bark = out.bark;
@@ -578,7 +652,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
 
     // Live movement & combat stepping
     const liveHostiles: Fighter[] = [];
-    for (const n of npcs) {
+    for (const n of activeNpcs) {
       if (n.mood === 'hostile' && n.fighter.state !== 'dead') liveHostiles.push(n.fighter);
     }
 
@@ -592,8 +666,35 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     const moveLen = Math.hypot(fwd, side);
     const moveX = moveLen > 0 ? (fxDir * fwd + rxDir * side) / moveLen : 0;
     const moveZ = moveLen > 0 ? (fzDir * fwd + rzDir * side) / moveLen : 0;
+    const turbo = game.onCycle && !frozen && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
 
-    if (game.weaponDrawn && !frozen) {
+    if (game.onCycle && !frozen && !game.inJail) {
+      // Fast, exhilarating Hard-Light Cycle riding across the R=200 horizon
+      p.state = 'idle';
+      p.atk = null;
+      p.blocking = false;
+      const targetSpd = moveLen > 0 ? (turbo ? CYCLE_TURBO_SPEED : CYCLE_SPEED) : 0;
+      s.cycleSpeed = THREE.MathUtils.lerp(s.cycleSpeed, targetSpd, 1 - Math.exp(-7.5 * dt));
+      let leanTarget = 0;
+      if (moveLen > 0) {
+        const targetYaw = Math.atan2(moveX, moveZ);
+        const turnDelta = Math.atan2(Math.sin(targetYaw - p.yaw), Math.cos(targetYaw - p.yaw));
+        p.yaw += turnDelta * (1 - Math.exp(-10 * dt));
+        leanTarget = THREE.MathUtils.clamp(-turnDelta * 0.55, -0.38, 0.38);
+      }
+      const dirX = Math.sin(p.yaw);
+      const dirZ = Math.cos(p.yaw);
+      p.vx = dirX * s.cycleSpeed;
+      p.vz = dirZ * s.cycleSpeed;
+      p.x += p.vx * dt;
+      p.z += p.vz * dt;
+      p.stamina = Math.min(p.maxStamina, p.stamina + 30 * dt);
+      p.hp = Math.min(p.maxHp, p.hp + 3.0 * dt);
+      p.localVz = 0;
+      p.localVx = 0;
+      cycleState.current.lean = THREE.MathUtils.lerp(cycleState.current.lean, leanTarget, 1 - Math.exp(-12 * dt));
+    } else if (game.weaponDrawn && !frozen) {
+      s.cycleSpeed = 0;
       const intent: Intent = {
         moveX, moveZ,
         light: b.light > 0,
@@ -622,9 +723,9 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         const motion = fg.moves[p.atk].motion;
         const slashColor = p.atk === 'light3' ? '#ffc95c' : motion === 'netThrow' ? '#3ff0ff' : p.stats.color;
         fx.slashes.spawn(p.x, p.z, p.yaw, p.atk, slashColor, p.style, motion);
-        const allCombatants = [p, ...npcs.filter((n) => n.mood !== 'dead').map((n) => n.fighter)];
+        const allCombatants = [p, ...activeNpcs.filter((n) => n.mood !== 'dead').map((n) => n.fighter)];
         for (const ev of resolveStrike(p, allCombatants) as HitEvent[]) {
-          const hitNpc = npcs.find((n) => n.fighter.id === ev.victim);
+          const hitNpc = activeNpcs.find((n) => n.fighter.id === ev.victim);
           if (!hitNpc) continue;
           fx.shards.burst(hitNpc.x, 1.3, hitNpc.z, ev.type === 'kill' ? 28 : 12, ev.type === 'kill' ? 9.5 : 5, hitNpc.color, ev.dx, ev.dz);
           if (ev.type === 'kill') {
@@ -653,7 +754,8 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         }
       }
     } else {
-      // Unarmed fast sprint navigation across the open TRON megacity
+      // Unarmed sprint navigation across the open continent
+      s.cycleSpeed = 0;
       p.state = 'idle';
       p.atk = null;
       p.blocking = false;
@@ -674,10 +776,11 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       p.localVx = 0;
     }
 
-    // Enforce world bounds & quarantine containment if trapped inside Quarantine Cell
+    // Enforce world bounds (-2000..2000) & dynamic nearby colliders
+    const nearbySolids = collidersNear(p.x, p.z);
     const posTmp = { x: p.x, z: p.z };
-    resolveCircles(posTmp, PLAYER_R, SOLIDS);
-    clampBounds(posTmp, PLAYER_R, BOUNDS);
+    resolveCircles(posTmp, PLAYER_R, nearbySolids);
+    clampBounds(posTmp, PLAYER_R, WORLD_BOUNDS);
     if (game.inJail) {
       posTmp.x = THREE.MathUtils.clamp(posTmp.x, JAIL_CELL.x - 2.3, JAIL_CELL.x + 2.3);
       posTmp.z = THREE.MathUtils.clamp(posTmp.z, JAIL_CELL.z - 2.3, JAIL_CELL.z + 2.3);
@@ -685,19 +788,43 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     p.x = posTmp.x;
     p.z = posTmp.z;
 
+    cycleState.current.active = game.onCycle && !game.inJail;
+    cycleState.current.x = p.x;
+    cycleState.current.z = p.z;
+    cycleState.current.yaw = p.yaw;
+    cycleState.current.speed = s.cycleSpeed;
+    cycleState.current.turbo = turbo;
+
     b.light = Math.max(0, b.light - dt);
     b.heavy = Math.max(0, b.heavy - dt);
     b.bash = Math.max(0, b.bash - dt);
     b.dodge = Math.max(0, b.dodge - dt);
     b.parry = Math.max(0, b.parry - dt);
 
-    // Step all 26 Deleted-File NPCs (wander / flee / hunt bounty / live combat)
-    for (const n of npcs) {
+    // Step active NPCs (Cache City when near origin, or local settlement NPCs)
+    const isNearCache = Math.hypot(p.x, p.z) < 185;
+    const playerInSanctuary = isSanctuaryPosition(p.x, p.z);
+    const restorePlayerAtPod = () => {
+      const nearest = nearestSettlement(p.x, p.z).settlement;
+      const rx = nearest.id === 'cache_city' ? -14 : nearest.spawnX;
+      const rz = nearest.id === 'cache_city' ? 32 : nearest.spawnZ;
+      p.x = rx; p.z = rz; p.state = 'idle'; p.hp = p.maxHp; p.stamina = p.maxStamina;
+      game.setOnCycle(false);
+      for (const k of LIMB_KEYS) { p.limbs[k].hp = p.limbs[k].max; p.limbs[k].severed = false; }
+      p.armor.helm.hp = p.armor.helm.max; p.armor.helm.broken = p.armor.helm.max <= 0;
+      p.armor.pauldron.hp = p.armor.pauldron.max; p.armor.pauldron.broken = p.armor.pauldron.max <= 0;
+      p.armor.shield.hp = p.armor.shield.max; p.armor.shield.broken = p.armor.shield.max <= 0;
+      game.setStreetToast({ speaker: 'SAFE SECTOR POD', text: 'Rebooted safely. All specs, properties & hard-light gear preserved.', color: '#a78bfa' });
+    };
+
+    for (const n of activeNpcs) {
       if (n.barkT > 0) n.barkT = Math.max(0, n.barkT - dt);
       if (n.mood === 'dead') {
         n.respawnT -= dt;
         if (n.respawnT <= 0) {
-          const spot = pickCityPoint(n.role === 'corrupted' ? 'heap' : 'plaza');
+          const spot = isNearCache
+            ? pickCityPoint(n.role === 'corrupted' ? 'heap' : 'plaza')
+            : { x: regionRef.current.x + (Math.random() - 0.5) * 24, z: regionRef.current.z + (Math.random() - 0.5) * 24 };
           n.x = spot.x; n.z = spot.z;
           n.mood = n.role === 'corrupted' ? 'hostile' : 'calm';
           n.civilian = n.role === 'citizen';
@@ -712,7 +839,6 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       const f = n.fighter;
       f.x = n.x; f.z = n.z;
 
-      // SysWatch Enforcer arrest patrol logic
       const dToPlayer = Math.hypot(p.x - n.x, p.z - n.z);
       if (n.role === 'enforcer' && game.bounty > 0 && !game.inJail && !frozen && s.time >= s.resistUntil && dToPlayer < 24) {
         if (dToPlayer < 4.4) {
@@ -724,16 +850,8 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         }
       }
 
-      // Auto-aggro corrupted heap files when player enters close proximity outside safe plaza
-      const restorePlayerAtPod = () => {
-        p.x = -14; p.z = 32; p.state = 'idle'; p.hp = p.maxHp; p.stamina = p.maxStamina;
-        for (const k of LIMB_KEYS) { p.limbs[k].hp = p.limbs[k].max; p.limbs[k].severed = false; }
-        p.armor.helm.hp = p.armor.helm.max; p.armor.helm.broken = p.armor.helm.max <= 0;
-        p.armor.pauldron.hp = p.armor.pauldron.max; p.armor.pauldron.broken = p.armor.pauldron.max <= 0;
-        p.armor.shield.hp = p.armor.shield.max; p.armor.shield.broken = p.armor.shield.max <= 0;
-        game.setStreetToast({ speaker: 'SAFE SECTOR POD', text: 'Rebooted at Safe Sector Pod. All specs and hard-light gear preserved.', color: '#a78bfa' });
-      };
-      if (n.role === 'corrupted' && n.mood === 'hostile' && !frozen && dToPlayer < 13 && !game.inJail) {
+      // Strictly block spontaneous corrupted auto-aggro whenever player stands inside ANY Sanctuary hub!
+      if (n.role === 'corrupted' && n.mood === 'hostile' && !playerInSanctuary && !frozen && dToPlayer < 13 && !game.inJail) {
         const intent = aiIntent(f, p, dt, liveHostiles);
         const strike = stepFighter(f, intent, dt, p);
         if (strike && f.atk) {
@@ -748,7 +866,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
             }
           }
         }
-      } else if (n.mood === 'hostile' && !frozen && dToPlayer < 26 && !game.inJail) {
+      } else if (n.mood === 'hostile' && n.role !== 'corrupted' && !frozen && dToPlayer < 26 && !game.inJail) {
         const intent = aiIntent(f, p, dt, liveHostiles);
         const strike = stepFighter(f, intent, dt, p);
         if (strike && f.atk) {
@@ -759,12 +877,11 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
             if (p.state === 'dead' || p.hp <= 0) {
               game.handleStreetDefeat(`de-rezzed by ${n.filename}`);
               restorePlayerAtPod();
-              for (const allN of npcs) if (allN.mood === 'hostile' && allN.role !== 'corrupted') allN.mood = 'calm';
+              for (const allN of activeNpcs) if (allN.mood === 'hostile' && allN.role !== 'corrupted') allN.mood = 'calm';
             }
           }
         }
       } else {
-        // Peaceful wander or panic flee away from player
         f.state = 'idle'; f.atk = null; f.blocking = false;
         let spd = n.civilian ? 1.85 : n.role === 'enforcer' ? 3.2 : 2.35;
         if (n.mood === 'fleeing' && dToPlayer < 22) {
@@ -781,7 +898,9 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
           const dist = Math.hypot(dx, dz);
           if (dist < 0.9) {
             if (n.mood === 'fleeing' && dToPlayer > 22) n.mood = 'calm';
-            const nextPt = pickCityPoint(n.role === 'corrupted' ? 'heap' : n.role === 'hustler' ? 'alley' : 'plaza');
+            const nextPt = isNearCache
+              ? pickCityPoint(n.role === 'corrupted' ? 'heap' : n.role === 'hustler' ? 'alley' : 'plaza')
+              : { x: regionRef.current.x + (Math.random() - 0.5) * 32, z: regionRef.current.z + (Math.random() - 0.5) * 32 };
             n.targetX = nextPt.x; n.targetZ = nextPt.z;
             n.wait = 1 + Math.random() * 4;
             f.vx = 0; f.vz = 0; f.localVz = 0;
@@ -797,10 +916,12 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       }
 
       const np = { x: f.x, z: f.z };
-      resolveCircles(np, 0.55, SOLIDS);
-      clampBounds(np, 0.55, BOUNDS);
+      resolveCircles(np, 0.55, nearbySolids);
+      clampBounds(np, 0.55, WORLD_BOUNDS);
       if (Math.hypot(np.x - n.x, np.z - n.z) < 0.008 && n.wait <= 0 && n.mood !== 'hostile') {
-        const nextPt = pickCityPoint(n.role === 'corrupted' ? 'heap' : 'plaza');
+        const nextPt = isNearCache
+          ? pickCityPoint(n.role === 'corrupted' ? 'heap' : 'plaza')
+          : { x: regionRef.current.x + (Math.random() - 0.5) * 28, z: regionRef.current.z + (Math.random() - 0.5) * 28 };
         n.targetX = nextPt.x; n.targetZ = nextPt.z;
       }
       f.x = np.x; f.z = np.z;
@@ -808,13 +929,42 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       n.yaw = f.yaw;
     }
 
-    // Periodic Unscripted RDR2 Street Event every ~22s
+    // Periodic World Event (safe chatter inside Sanctuary hubs; wild encounters in frontiers!)
     if (!frozen && !game.inJail) {
       s.eventTimer -= dt;
       if (s.eventTimer <= 0) {
-        s.eventTimer = 22 + Math.random() * 12;
-        const ev = triggerStreetEvent(npcs, p.x, p.z);
+        s.eventTimer = 24 + Math.random() * 12;
+        const ev = triggerStreetEvent(activeNpcs, p.x, p.z);
         if (ev) game.setStreetToast({ speaker: `${ev.title} · ${ev.speaker}`, text: ev.bark, color: ev.color });
+      }
+    }
+
+    // Real-time Fable Property Rent collection every 45s of exploration
+    if (!frozen && !game.inJail) {
+      s.rentTimer -= dt;
+      if (s.rentTimer <= 0) {
+        s.rentTimer = 45;
+        game.collectPropertyRent();
+      }
+    }
+
+    // Settlement discovery + regional NPC pool swap + world telemetry
+    s.discoveryTick += dt;
+    if (s.discoveryTick >= 0.25) {
+      s.discoveryTick = 0;
+      const nearSet = nearestSettlement(p.x, p.z);
+      if (nearSet.dist < 120) game.discoverSettlement(nearSet.settlement.id);
+      if (nearSet.settlement.id !== 'cache_city' && nearSet.dist < 175) {
+        if (regionRef.current.settlementId !== nearSet.settlement.id) {
+          setRegionNpcs({
+            settlementId: nearSet.settlement.id,
+            x: nearSet.settlement.x,
+            z: nearSet.settlement.z,
+            list: createRegionNpcs(nearSet.settlement),
+          });
+        }
+      } else if (regionRef.current.settlementId !== null && (isNearCache || nearSet.dist > 195)) {
+        setRegionNpcs({ settlementId: null, x: 0, z: 0, list: [] });
       }
     }
 
@@ -825,7 +975,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     fx.slashes.update(dt);
     fx.ghosts.update(dt);
 
-    // Sync Player 3D rig
+    // Sync Player 3D rig (raised slightly on saddle when riding Hard-Light Cycle)
     if (g.current) {
       for (const k of LIMB_KEYS) {
         limbPose.current[k].ratio = p.limbs[k].hp / (p.limbs[k].max || 1);
@@ -837,20 +987,29 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       armorPose.current.shield = !p.armor.shield.broken;
       g.current.pose.armor = armorPose.current;
       const showcaseOpen = game.panel === 'locker' || game.panel === 'smith' || game.panel === 'armorer';
-      syncGladiatorView(g.current, p, game.weaponDrawn ? 1 : showcaseOpen ? 0.85 : 0, playerGear.speedMul);
+      syncGladiatorView(g.current, p, game.weaponDrawn ? 1 : game.onCycle ? 0.65 : showcaseOpen ? 0.85 : 0, playerGear.speedMul);
+      if (game.onCycle && !game.inJail) {
+        g.current.group.position.y = 0.42;
+      }
     }
 
-    // Camera rig: 3D showcase drawer or Citadel third-person curved socket cam
+    // Camera rig: Showcase drawer / Light-Cycle chase cam / Citadel third-person curved socket cam
     const showcaseOpen = game.panel === 'locker' || game.panel === 'smith' || game.panel === 'armorer';
     if (showcaseOpen) {
       s.dCam.set(p.x - fxDir * 3.05 + rxDir * 0.65, 1.78, p.z - fzDir * 3.05 + rzDir * 0.65);
       s.dLook.set(p.x + rxDir * 0.72, 1.15, p.z + rzDir * 0.72);
     } else {
-      const lead = Math.min(Math.hypot(p.vx, p.vz) / 60, 0.27 * 1.5) * CAMERA_MOVE_LEAD;
+      const cyclePull = game.onCycle ? (turbo ? 2.8 : 2.0) : 0;
+      const cycleLift = game.onCycle ? 0.55 : 0;
+      const lead = Math.min(Math.hypot(p.vx, p.vz) / 60, 0.45) * CAMERA_MOVE_LEAD;
       const cp = Math.cos(s.pitch), sn = Math.sin(s.pitch);
-      const lookDist = CAMERA_LOOK_AHEAD + lead;
+      const lookDist = CAMERA_LOOK_AHEAD + lead + (game.onCycle ? 3.0 : 0);
       s.dLook.set(p.x + fxDir * lookDist * cp, EYE_Y + CAMERA_LOOK_HEIGHT + lookDist * sn * 2.2, p.z + fzDir * lookDist * cp);
-      s.dCam.set(p.x - fxDir * CAMERA_SOCKET_DISTANCE, EYE_Y + CAMERA_SOCKET_HEIGHT, p.z - fzDir * CAMERA_SOCKET_DISTANCE);
+      s.dCam.set(
+        p.x - fxDir * (CAMERA_SOCKET_DISTANCE + cyclePull),
+        EYE_Y + CAMERA_SOCKET_HEIGHT + cycleLift,
+        p.z - fzDir * (CAMERA_SOCKET_DISTANCE + cyclePull),
+      );
     }
     const alpha = 1 - Math.pow(1 - CAMERA_LERP, dt * 60);
     s.cam.lerp(s.dCam, alpha);
@@ -858,14 +1017,63 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     camera.position.copy(s.cam);
     camera.lookAt(s.lookAt);
 
-    // Stations + HUD nearNpc/vitals sync (throttled lightly for vitals)
-    const near = game.inJail ? null : nearestStation(p.x, p.z);
-    game.setNear(frozen ? game.near : near?.id ?? null);
-    if (!frozen && near && (pressed('Enter') || pressed('Space'))) game.openPanel(near.id);
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const targetFov = game.onCycle ? (turbo ? 74 : 70) : 66;
+      if (Math.abs(camera.fov - targetFov) > 0.05) {
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 1 - Math.exp(-8 * dt));
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    // Interactions: Colosseum Gate > Property Deed > Station / Capital Terminal
+    const nearColGate = game.inJail ? null : nearestWorldColosseumGate(p.x, p.z);
+    const nearProp = game.inJail ? null : nearestPropertyDeed(p.x, p.z);
+    const nearCacheStation = !game.inJail && isNearCache ? nearestStation(p.x, p.z) : null;
+    const nearCapTerm = !game.inJail && !isNearCache ? nearestSettlementTerminal(p.x, p.z) : null;
+
+    if (!frozen) {
+      game.setNearColosseum(nearColGate?.id ?? null);
+      game.setNearProperty(nearProp?.id ?? null);
+      const stationId = nearCacheStation ? nearCacheStation.id : nearCapTerm ? nearCapTerm.kind : null;
+      game.setNear(stationId);
+
+      const interactPressed = pressed('Enter') || (!game.onCycle && !game.weaponDrawn && pressed('Space'));
+      if (interactPressed) {
+        if (nearColGate) {
+          game.setLastWorldPos(p.x, p.z);
+          game.openColosseumGate(nearColGate.id);
+        } else if (nearProp) {
+          game.openPropertyPanel(nearProp.id);
+        } else if (nearCacheStation) {
+          if (nearCacheStation.id === 'gate') {
+            game.setLastWorldPos(p.x, p.z);
+            game.openColosseumGate('cache_city');
+          } else {
+            game.openPanel(nearCacheStation.id);
+          }
+        } else if (nearCapTerm) {
+          game.openPanel(nearCapTerm.kind);
+        }
+      }
+    }
 
     s.vitalsTick += dt;
-    if (s.vitalsTick > 0.1) {
+    if (s.vitalsTick > 0.14) {
       s.vitalsTick = 0;
+      const nc = nearestColosseum(p.x, p.z);
+      game.setWorldTelemetry({
+        beacon: {
+          id: nc.colosseum.id,
+          name: nc.colosseum.name,
+          cityLabel: nc.colosseum.cityLabel,
+          color: nc.colosseum.color,
+          dist: nc.dist,
+          bearing: nc.bearing,
+        },
+        regionName: regionDisplayName(p.x, p.z),
+        x: p.x,
+        z: p.z,
+      });
       game.setStreetVitals({ hp: Math.ceil(p.hp), maxHp: p.maxHp, st: Math.floor(p.stamina), maxSt: p.maxStamina });
       game.setNearNpc(
         closestNpc
@@ -886,7 +1094,11 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
 
   return (
     <group>
-      {npcs.map((n) => <NpcActor key={n.id} npc={n} />)}
+      <group ref={cacheNpcGroup}>
+        {cacheNpcs.map((n) => <NpcActor key={n.id} npc={n} />)}
+      </group>
+      {regionNpcs.list.map((n) => <NpcActor key={`${regionNpcs.settlementId}-${n.id}`} npc={n} />)}
+      <LightCycle stateRef={cycleState} color={lookColor(look)} />
       <Gladiator
         key={`${look}-${loadout.weaponId}-${loadout.offhandId}-${loadout.helmId}-${loadout.bodyId}-${loadout.capeId}`}
         ref={g}
@@ -904,15 +1116,52 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
   );
 }
 
+function CacheCityDistrict({ playerPos }: { playerPos: PosRef }) {
+  const grp = useRef<THREE.Group>(null!);
+  useFrame(() => {
+    if (grp.current) {
+      grp.current.visible = Math.hypot(playerPos.current.x, playerPos.current.z) < 250;
+    }
+  });
+  return (
+    <group ref={grp}>
+      <NeonCityFloor />
+      <SurrealSpores />
+      <NeonDataAqueduct />
+      <StaticBatch>
+        <Colonnade playerPos={playerPos} />
+        <NightCityArchitecture />
+      </StaticBatch>
+      <Brazier position={[-16, 0, -2]} scale={0.95} color="#3ff0ff" light />
+      <Brazier position={[16, 0, -2]} scale={0.95} color="#ff4fd8" />
+      <Brazier position={[-16, 0, -20]} scale={0.95} color="#ffc95c" />
+      <Brazier position={[16, 0, -20]} scale={0.95} color="#3ff0ff" />
+      <Brazier position={[-7.5, 0, 22]} scale={0.9} color="#a78bfa" />
+      <Brazier position={[7.5, 0, 22]} scale={0.9} color="#3ff0ff" />
+      <Stations />
+    </group>
+  );
+}
+
 export function Ludus() {
-  const playerPos = useRef(new THREE.Vector3(PLAYER_START.x, 0, PLAYER_START.z));
+  const start = useGame.getState().lastWorldPos;
+  const playerPos = useRef(new THREE.Vector3(start.x, 0, start.z));
   const timeOfDay = useGame((s) => s.timeOfDay);
+  const currentRegionName = useGame((s) => s.currentRegionName);
   const morning = timeOfDay === 'morning';
+  const curBiome = biomeAt(playerPos.current.x, playerPos.current.z);
+  const fogHex =
+    curBiome === 'bazaar' ? '#1c0f08'
+    : curBiome === 'vault' ? '#0e102e'
+    : curBiome === 'frontier' ? '#21070d'
+    : curBiome === 'kernel' ? '#1c180a'
+    : morning ? '#0d1936' : '#1e082e';
+  void currentRegionName;
 
   return (
     <>
       <color attach="background" args={[morning ? '#070a1c' : '#12051c']} />
-      <fog attach="fog" args={[morning ? '#0d1936' : '#1e082e', morning ? 48 : 38, morning ? 175 : 155]} />
+      <fog attach="fog" args={[fogHex, morning ? 56 : 44, morning ? 195 : 175]} />
       <hemisphereLight args={morning ? ['#4fd8ff', '#16112b', 1.1] : ['#ff62b8', '#150826', 0.95]} />
       <directionalLight
         position={morning ? [28, 42, 22] : [-26, 22, -24]}
@@ -924,23 +1173,12 @@ export function Ludus() {
         intensity={0.6}
         color={morning ? '#ff6ad5' : '#3ff0ff'}
       />
-      <Ps1Sky mood={morning ? 'city_cycle' : 'city_purge'} />
+      <Ps1Sky mood={morning ? 'city_cycle' : 'city_purge'} playerPosRef={playerPos} openWorld />
       <Starfield playerPosRef={playerPos} />
-      <NeonCityFloor />
-      <SurrealSpores />
-      <NeonDataAqueduct />
-      <StaticBatch>
-        <Colonnade playerPos={playerPos} />
-        <NightCityArchitecture />
-      </StaticBatch>
-      {/* Street Plasma Pylons illuminating Plaza & Under-Conduit Alleys */}
-      <Brazier position={[-16, 0, -2]} scale={0.95} color="#3ff0ff" light />
-      <Brazier position={[16, 0, -2]} scale={0.95} color="#ff4fd8" />
-      <Brazier position={[-16, 0, -20]} scale={0.95} color="#ffc95c" />
-      <Brazier position={[16, 0, -20]} scale={0.95} color="#3ff0ff" />
-      <Brazier position={[-7.5, 0, 22]} scale={0.9} color="#a78bfa" />
-      <Brazier position={[7.5, 0, 22]} scale={0.9} color="#3ff0ff" />
-      <Stations />
+      <InfiniteCurvedFloor playerPos={playerPos} />
+      <CacheCityDistrict playerPos={playerPos} />
+      <StreamingSettlements playerPos={playerPos} />
+      <NearestColosseumBeacon playerPos={playerPos} />
       <CityWorldSimulation playerPos={playerPos} />
     </>
   );

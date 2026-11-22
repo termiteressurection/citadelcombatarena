@@ -1,5 +1,6 @@
 import type { Kind } from '../arena/combat';
 import type { StyleId } from '../arena/styles';
+import type { CapitalId } from '../world/universe';
 import type { Loadout, WeaponFamily } from './items';
 
 export type QuestKind = 'kills' | 'parries' | 'armors' | 'win_weapon' | 'no_flask';
@@ -97,70 +98,119 @@ const TIER2_LOADOUTS: { style: StyleId; loadout: Loadout; tag: string }[] = [
   { style: 'executioner', tag: 'Hex Maul Enforcer', loadout: { weaponId: 'iron_warhammer', offhandId: 'none', helmId: 'iron_cage', bodyId: 'spiked_iron', capeId: 'none' } },
 ];
 
-export function generateFightCards(day: number, fame: number): FightCard[] {
-  const r1 = TIER1_LOADOUTS[(day - 1) % TIER1_LOADOUTS.length];
-  const r2 = TIER2_LOADOUTS[(day + 1) % TIER2_LOADOUTS.length];
-  const name1 = RIVAL_NAMES[day % RIVAL_NAMES.length];
-  const name2 = RIVAL_NAMES[(day + 3) % RIVAL_NAMES.length];
-  const name3a = RIVAL_NAMES[(day + 2) % RIVAL_NAMES.length];
-  const name3b = RIVAL_NAMES[(day + 5) % RIVAL_NAMES.length];
+const COLOSSEUM_THEMES: Record<CapitalId, {
+  mul: number;
+  offset: number;
+  titles: [string, string, string, string];
+  bossName: string;
+  wingName: string;
+}> = {
+  cache_city: {
+    mul: 1.0,
+    offset: 0,
+    titles: ['CACHE SKIRMISH', 'MEMORY DUEL', 'DUAL PROCESS', 'PURGE'],
+    bossName: 'crixus_root.sys',
+    wingName: 'theokoles_00.img',
+  },
+  drift_bazaars: {
+    mul: 1.1,
+    offset: 1,
+    titles: ['SCRAP-RING BRAWL', 'AMBER CAGE MATCH', 'TWIN-SCAFFOLD CLASH', 'BAZAAR KINGPIN'],
+    bossName: 'torque_v8.tmp',
+    wingName: 'brass_jaw.dat',
+  },
+  cold_vaults: {
+    mul: 1.2,
+    offset: 2,
+    titles: ['SILENT TRIAL', 'CRYSTAL LITURGY', 'CHORUS OF TWO', 'ARCHIVE CHAMPION'],
+    bossName: 'solstice_01.sav',
+    wingName: 'warden_frost.bin',
+  },
+  rust_citadel: {
+    mul: 1.35,
+    offset: 3,
+    titles: ['HEAP AMBUSH', 'OVERFLOW SLAUGHTER', 'CRIMSON CROSSFIRE', 'WARLORD PURGE'],
+    bossName: 'segfault_rex.err',
+    wingName: 'iron_null.bad',
+  },
+  kernel_spire: {
+    mul: 1.5,
+    offset: 4,
+    titles: ['CHECKSUM DUEL', 'GOLDEN COMPILER', 'ROOT GUARDIANS', 'SOVEREIGN ASCENSION'],
+    bossName: 'kernel_prime.sys',
+    wingName: 'aegis_00.rom',
+  },
+};
+
+export function generateFightCards(day: number, fame: number, colosseumId: CapitalId = 'cache_city'): FightCard[] {
+  const theme = COLOSSEUM_THEMES[colosseumId] ?? COLOSSEUM_THEMES.cache_city;
+  const seed = day + theme.offset;
+  const r1 = TIER1_LOADOUTS[(seed - 1) % TIER1_LOADOUTS.length];
+  const r2 = TIER2_LOADOUTS[(seed + 1) % TIER2_LOADOUTS.length];
+  const name1 = RIVAL_NAMES[seed % RIVAL_NAMES.length];
+  const name2 = RIVAL_NAMES[(seed + 3) % RIVAL_NAMES.length];
+  const name3a = RIVAL_NAMES[(seed + 2) % RIVAL_NAMES.length];
+  const name3b = RIVAL_NAMES[(seed + 5) % RIVAL_NAMES.length];
   const champScaleBonus = fame >= 550 ? 'ROOT-LEVEL' : 'CROWNED';
+  const mainTitle = colosseumId === 'cache_city' ? `${champScaleBonus} ${theme.titles[3]}` : theme.titles[3];
+  const m = theme.mul;
+  const sc = (n: number) => Math.round(n * m);
 
   return [
     {
-      id: `d${day}_pit`,
-      title: 'CACHE SKIRMISH',
+      id: `${colosseumId}_d${day}_pit`,
+      title: theme.titles[0],
       subtitle: `1v1 · ${name1} (${r1.tag})`,
       tier: 1,
       reqFame: 0,
-      denarii: 45,
-      xp: 45,
-      fame: 25,
+      denarii: sc(45),
+      xp: sc(45),
+      fame: sc(25),
       enemies: [{ name: name1, kind: 'skirmisher', style: r1.style, loadout: r1.loadout }],
     },
     {
-      id: `d${day}_rival`,
-      title: 'MEMORY DUEL',
+      id: `${colosseumId}_d${day}_rival`,
+      title: theme.titles[1],
       subtitle: `1v1 · ${name2} (${r2.tag})`,
       tier: 2,
       reqFame: 0,
-      denarii: 80,
-      xp: 70,
-      fame: 45,
+      denarii: sc(80),
+      xp: sc(70),
+      fame: sc(45),
       enemies: [{ name: name2, kind: 'brute', style: r2.style, loadout: r2.loadout }],
     },
     {
-      id: `d${day}_gauntlet`,
-      title: 'DUAL PROCESS',
+      id: `${colosseumId}_d${day}_gauntlet`,
+      title: theme.titles[2],
       subtitle: `2v1 · ${name3a} (Trident & Net) + ${name3b} (Vector Spear)`,
       tier: 3,
       reqFame: 60,
-      denarii: 140,
-      xp: 110,
-      fame: 75,
+      denarii: sc(140),
+      xp: sc(110),
+      fame: sc(75),
       enemies: [
         { name: name3a, kind: 'skirmisher', style: 'retiarius' },
         { name: name3b, kind: 'skirmisher', style: 'hoplomachus' },
       ],
     },
     {
-      id: `d${day}_main`,
-      title: `${champScaleBonus} PURGE`,
-      subtitle: 'Main Event · Zero-Day Lance Sovereign + Purge Crusher',
+      id: `${colosseumId}_d${day}_main`,
+      title: mainTitle,
+      subtitle: `Main Event · ${theme.bossName} + ${theme.wingName}`,
       tier: 4,
       reqFame: 150,
-      denarii: 260,
-      xp: 180,
-      fame: 140,
+      denarii: sc(260),
+      xp: sc(180),
+      fame: sc(140),
       enemies: [
         {
-          name: 'crixus_root.sys',
+          name: theme.bossName,
           kind: 'champion',
           style: 'hoplomachus',
           loadout: { weaponId: 'champion_spear', offhandId: 'bronze_buckler', helmId: 'corinthian_gold', bodyId: 'champion_cuirass', capeId: 'imperial_mantle' },
         },
         {
-          name: 'theokoles_00.img',
+          name: theme.wingName,
           kind: 'brute',
           style: 'executioner',
           loadout: { weaponId: 'maul_breaker', offhandId: 'none', helmId: 'iron_cage', bodyId: 'spiked_iron', capeId: 'none' },

@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { STATIONS } from './world/layout';
+import { CAPITALS, COLOSSEUMS, SETTLEMENTS } from './world/universe';
+import {
+  PROPERTIES, PROPERTY_BY_ID, discountedCost, ownerShopDiscount, propertyRenovateCost,
+  propertyRentPayout, propertySellValue, reputationRankOf,
+} from './world/properties';
 import { useGame } from './store';
 import { useArena, type LimbHud } from './arena/arenaStore';
 import { boonById } from './arena/boons';
@@ -48,6 +53,8 @@ function TownStatusStrip() {
   const g = useGame();
   if (g.scene !== 'ludus') return null;
   const rank = fameRankOf(g.fame);
+  const rep = reputationRankOf(g.reputation);
+  const ownedCount = Object.keys(g.ownedProperties).length;
   const needXp = xpForNextLevel(g.level);
   const xpPct = Math.min(100, (g.xp / needXp) * 100);
   const gear = resolveLoadout(g.loadout);
@@ -55,11 +62,29 @@ function TownStatusStrip() {
 
   return (
     <>
+      {/* Nearest Capital Colosseum Sky-Beacon Compass Pill */}
+      {!g.atlasOpen && !g.panel && !g.activePropertyId && !g.arrestPrompt && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+            padding: '5px 14px', borderColor: g.nearestBeacon.color,
+            display: 'flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.12em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ color: g.nearestBeacon.color, fontSize: 14 }}>◆</span>
+          <span style={{ color: '#a99dc4' }}>NEAREST COLOSSEUM</span>
+          <span style={{ color: g.nearestBeacon.color, fontWeight: 700 }}>{g.nearestBeacon.name}</span>
+          <span style={{ color: '#ffc95c' }}>{g.nearestBeacon.dist}m {g.nearestBeacon.bearing}</span>
+        </div>
+      )}
+
       <div
         className="ps1-box clickable"
         style={{
           position: 'absolute', top: 44, left: 20, padding: '10px 14px',
-          display: 'grid', gap: 6, width: 325,
+          display: 'grid', gap: 6, width: 332,
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, letterSpacing: '.14em' }}>
@@ -84,18 +109,47 @@ function TownStatusStrip() {
           </span>
         </div>
 
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, letterSpacing: '.09em' }}>
+          <span style={{ color: rep.color }}>REP: {rep.label}</span>
+          <span style={{ color: ownedCount > 0 ? '#4dffa0' : '#a99dc4' }}>
+            DEEDS OWNED: {ownedCount}
+          </span>
+        </div>
+
         {showStreetBars && (
           <div style={{ display: 'grid', gap: 4, paddingTop: 2 }}>
-            <Bar v={g.streetVitals.hp} max={g.streetVitals.maxHp} color="#ff4f6d" w={292} />
-            <Bar v={g.streetVitals.st} max={g.streetVitals.maxSt} color="#4dffa0" w={220} />
+            <Bar v={g.streetVitals.hp} max={g.streetVitals.maxHp} color="#ff4f6d" w={298} />
+            <Bar v={g.streetVitals.st} max={g.streetVitals.maxSt} color="#4dffa0" w={224} />
           </div>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 2 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginTop: 2 }}>
           <button
             className="clickable btn"
             style={{
-              padding: '4px 8px', fontSize: 10, letterSpacing: '.08em',
+              width: '100%', padding: '4px 6px', fontSize: 10, letterSpacing: '.07em',
+              borderColor: g.onCycle ? '#3ff0ff' : '#6e5a88',
+              color: g.onCycle ? '#3ff0ff' : '#e9e6ff',
+            }}
+            onClick={() => g.toggleCycle()}
+          >
+            [V] {g.onCycle ? 'DISMOUNT CYCLE' : 'LIGHT-CYCLE'}
+          </button>
+          <button
+            className="clickable btn"
+            style={{
+              width: '100%', padding: '4px 6px', fontSize: 10, letterSpacing: '.07em',
+              borderColor: g.atlasOpen ? '#ffc95c' : '#c99b43',
+              color: '#ffc95c',
+            }}
+            onClick={() => g.toggleAtlas()}
+          >
+            [M] WORLD ATLAS
+          </button>
+          <button
+            className="clickable btn"
+            style={{
+              width: '100%', padding: '4px 6px', fontSize: 10, letterSpacing: '.07em',
               borderColor: g.weaponDrawn ? '#ff4f6d' : '#3ff0ff',
               color: g.weaponDrawn ? '#ff4f6d' : '#3ff0ff',
             }}
@@ -106,7 +160,7 @@ function TownStatusStrip() {
           <button
             className="clickable btn"
             style={{
-              padding: '4px 9px', fontSize: 10, letterSpacing: '.1em',
+              width: '100%', padding: '4px 6px', fontSize: 10, letterSpacing: '.07em',
               borderColor: g.statPoints > 0 ? '#4dffa0' : '#c99b43',
               color: g.statPoints > 0 ? '#4dffa0' : '#ffc95c',
             }}
@@ -151,7 +205,7 @@ function TownStatusStrip() {
         </div>
       </div>
 
-      {!g.panel && !g.arrestPrompt && (
+      {!g.panel && !g.arrestPrompt && !g.atlasOpen && !g.activePropertyId && (
         <div
           className="ps1-box"
           style={{
@@ -218,11 +272,11 @@ function StreetOverlays() {
         </div>
       )}
 
-      {g.nearNpc && !g.panel && !g.arrestPrompt && !g.inJail && (
+      {g.nearNpc && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && !g.onCycle && (
         <div
           className="ps1-box"
           style={{
-            position: 'absolute', bottom: g.near ? 104 : 56, left: '50%', transform: 'translateX(-50%)',
+            position: 'absolute', bottom: g.near || g.nearPropertyId || g.nearColosseumId ? 104 : 56, left: '50%', transform: 'translateX(-50%)',
             padding: '8px 16px', minWidth: 320, textAlign: 'center', display: 'grid', gap: 5,
             borderColor: g.nearNpc.hostile ? '#ff4f6d' : '#3ff0ff',
           }}
@@ -494,6 +548,7 @@ function LockerDrawer() {
 
 function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
   const g = useGame();
+  const disc = ownerShopDiscount(g.ownedProperties);
   const title = kind === 'smith' ? 'COMPILER FORGE' : 'SHELL CLINIC';
   const sections: { slot: GearSlot; label: string; items: { id: string; name: string; desc: string; cost: number; reqFame: number; color?: string; twoHanded?: boolean; netHeavy?: boolean }[] }[] =
     kind === 'smith'
@@ -512,7 +567,10 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #c99b4355', paddingBottom: 8 }}>
         <div>
           <h2 className="ps1-heading" style={{ color: kind === 'smith' ? '#ff8a3d' : '#3ff0ff', fontSize: 19, letterSpacing: '.22em' }}>{title}</h2>
-          <div style={{ fontSize: 11, color: '#ffc95c', marginTop: 2 }}>{g.denarii} CYCLES · {g.fame} SIGNAL</div>
+          <div style={{ fontSize: 11, color: '#ffc95c', marginTop: 2 }}>
+            {g.denarii} CYCLES · {g.fame} SIGNAL
+            {disc > 0 && <span style={{ color: '#4dffa0', marginLeft: 8 }}>(-{Math.round(disc * 100)}% OWNER DEAL)</span>}
+          </div>
         </div>
         <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.openPanel(null)}>CLOSE</button>
       </div>
@@ -526,8 +584,9 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
             {items.map((it) => {
               const owned = ownedIds.includes(it.id);
               const eq = curId === it.id;
+              const price = discountedCost(it.cost, g.ownedProperties);
               const lockedSignal = !owned && g.fame < it.reqFame;
-              const cantAfford = !owned && !lockedSignal && g.denarii < it.cost;
+              const cantAfford = !owned && !lockedSignal && g.denarii < price;
               const col = it.color ?? '#ffc95c';
               return (
                 <button
@@ -548,7 +607,7 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
                       {eq ? '▶ ' : ''}{it.name}{it.twoHanded ? ' [2H]' : it.netHeavy ? ' [NET]' : ''}
                     </span>
                     <span style={{ fontSize: 10 }}>
-                      {eq ? 'EQUIPPED' : owned ? 'OWNED · EQUIP' : lockedSignal ? `REQ ${it.reqFame} SIG` : `${it.cost}C · BUY`}
+                      {eq ? 'EQUIPPED' : owned ? 'OWNED · EQUIP' : lockedSignal ? `REQ ${it.reqFame} SIG` : `${price}C · BUY`}
                     </span>
                   </div>
                   <div style={{ fontSize: 9, color: '#cfc6e8' }}>{it.desc}</div>
@@ -571,25 +630,33 @@ function StationPanel() {
   if (g.panel === 'smith' || g.panel === 'armorer') return <ShopDrawer kind={g.panel} />;
 
   const s = STATIONS.find((x) => x.id === g.panel)!;
+  const activeCol = COLOSSEUMS.find((c) => c.id === g.activeColosseumId) ?? COLOSSEUMS[0];
+  const isGate = g.panel === 'gate';
+  const headingLabel = isGate ? activeCol.name : s.label;
+  const headingColor = isGate ? activeCol.color : s.color;
+  const disc = ownerShopDiscount(g.ownedProperties);
+
   const gear = resolveLoadout(g.loadout);
   const dailyQuests = generateDailyQuests(g.day);
-  const fightCards = generateFightCards(g.day, g.fame);
+  const fightCards = generateFightCards(g.day, g.fame, activeCol.id);
   const rank = fameRankOf(g.fame);
   const nextRank = nextFameRankOf(g.fame);
 
   const body: Record<string, JSX.Element> = {
     apothecary: (
       <>
-        <div style={{ display: 'flex', gap: 18, fontSize: 12, color: '#ffc95c' }}>
+        <div style={{ display: 'flex', gap: 18, fontSize: 12, color: '#ffc95c', flexWrap: 'wrap', justifyContent: 'center' }}>
           <span>{g.denarii} CYCLES</span>
           <span style={{ color: '#4dffa0' }}>RESTORES: {g.flasks}/{MAX_FLASKS}</span>
+          {disc > 0 && <span style={{ color: '#3ff0ff' }}>OWNER -{Math.round(disc * 100)}%</span>}
         </div>
         <div style={{ display: 'grid', gap: 8, width: '100%' }}>
           {CONSUMABLES.map((c) => {
             const isFlask = c.kind === 'flask';
             const full = isFlask && g.flasks >= MAX_FLASKS;
             const active = !isFlask && g.dailyBuffs.includes(c.id as typeof g.dailyBuffs[number]);
-            const disabled = full || active || g.denarii < c.cost;
+            const price = discountedCost(c.cost, g.ownedProperties);
+            const disabled = full || active || g.denarii < price;
             return (
               <button
                 key={c.id}
@@ -604,7 +671,7 @@ function StationPanel() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                   <span style={{ color: c.color }}>{c.name}</span>
-                  <span>{active ? 'ACTIVE CYCLE' : full ? 'SLOT FULL' : `${c.cost} CYCLES`}</span>
+                  <span>{active ? 'ACTIVE CYCLE' : full ? 'SLOT FULL' : `${price} CYCLES`}</span>
                 </div>
                 <div style={{ fontSize: 10, color: '#cfc6e8' }}>{c.desc}</div>
               </button>
@@ -842,9 +909,373 @@ function StationPanel() {
   return (
     <div className="panel clickable">
       <div className="ps1-box" style={{ display: 'grid', gap: 14, width: 'min(640px, 92vw)', maxHeight: '86vh', overflowY: 'auto', justifyItems: 'center' }}>
-        <h1 style={{ color: s.color, fontSize: 26, textShadow: `2px 2px 0 #05030a, 0 0 18px ${s.color}77` }}>{s.label}</h1>
+        <h1 style={{ color: headingColor, fontSize: 26, textShadow: `2px 2px 0 #05030a, 0 0 18px ${headingColor}77` }}>{headingLabel}</h1>
         {body[g.panel]}
         <p style={{ opacity: 0.55, fontSize: 11 }}>[ESC] to close</p>
+      </div>
+    </div>
+  );
+}
+
+/** Fable-inspired Real Estate Deed Panel: buy homes/shops, live or rent out, set Low/Fair/High rent, renovate & heal. */
+function PropertyPanel() {
+  const g = useGame();
+  if (!g.activePropertyId) return null;
+  const def = PROPERTY_BY_ID.get(g.activePropertyId);
+  if (!def) return null;
+  const owned = g.ownedProperties[def.id];
+  const rep = reputationRankOf(g.reputation);
+
+  const tierNames: Record<1 | 2 | 3, string> = {
+    1: 'TIER 1 · FLICKERING DRAFT',
+    2: 'TIER 2 · SOLID NEON',
+    3: 'TIER 3 · KERNEL GOLD',
+  };
+
+  const lowPay = propertyRentPayout(def, { id: def.id, mode: 'rent', rentRate: 'low', tier: owned?.tier ?? 1 });
+  const fairPay = propertyRentPayout(def, { id: def.id, mode: 'rent', rentRate: 'fair', tier: owned?.tier ?? 1 });
+  const highPay = propertyRentPayout(def, { id: def.id, mode: 'rent', rentRate: 'high', tier: owned?.tier ?? 1 });
+  const renCost = owned && owned.tier < 3 ? propertyRenovateCost(def, owned.tier) : 0;
+  const sellVal = owned ? propertySellValue(def, owned) : 0;
+
+  return (
+    <div className="panel clickable">
+      <div className="ps1-box" style={{ display: 'grid', gap: 12, width: 'min(560px, 92vw)', borderColor: owned ? '#4dffa0' : '#ffc95c', textAlign: 'left' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #c99b4355', paddingBottom: 8 }}>
+          <div>
+            <div style={{ fontSize: 10, color: def.accent, letterSpacing: '.16em' }}>
+              {def.settlementName} · {def.kind.toUpperCase()} DEED
+            </div>
+            <h1 style={{ fontSize: 22, letterSpacing: '.16em', color: owned ? '#4dffa0' : '#ffc95c' }}>{def.name}</h1>
+          </div>
+          <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.openPropertyPanel(null)}>CLOSE</button>
+        </div>
+
+        <p style={{ fontSize: 12, color: '#e9e6ff' }}>{def.desc}</p>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#ffc95c', background: '#07050e', padding: '7px 10px', border: '1px solid #4d3f66' }}>
+          <span>YOUR CYCLES: {g.denarii}</span>
+          <span style={{ color: rep.color }}>REPUTATION: {rep.label} ({g.reputation})</span>
+        </div>
+
+        {!owned ? (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#cfc6e8' }}>
+              <span>DEED PRICE: <strong style={{ color: '#ffc95c' }}>{def.price} CYCLES</strong></span>
+              <span>BASE RENT: <strong style={{ color: '#4dffa0' }}>+{def.baseRent}C / CYCLE</strong></span>
+            </div>
+            <button
+              className="clickable btn"
+              disabled={g.denarii < def.price}
+              style={{
+                width: '100%', padding: '12px', fontSize: 13,
+                borderColor: '#ffc95c', color: '#ffc95c',
+                opacity: g.denarii < def.price ? 0.45 : 1,
+              }}
+              onClick={() => g.buyProperty(def.id)}
+            >
+              {g.denarii < def.price ? `NEED ${def.price - g.denarii} MORE CYCLES` : `BUY DEED (${def.price} CYCLES)`}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 11, color: '#3ff0ff', letterSpacing: '.12em' }}>
+              {tierNames[owned.tier]}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <button
+                className="clickable btn"
+                style={{
+                  width: '100%', padding: '8px', fontSize: 11,
+                  borderColor: owned.mode === 'live' ? '#3ff0ff' : '#4d3f66',
+                  color: owned.mode === 'live' ? '#3ff0ff' : '#cfc6e8',
+                  background: owned.mode === 'live' ? '#102436' : '#0b0816',
+                }}
+                onClick={() => g.setPropertyMode(def.id, 'live')}
+              >
+                LIVE HERE (FREE HEAL)
+              </button>
+              <button
+                className="clickable btn"
+                style={{
+                  width: '100%', padding: '8px', fontSize: 11,
+                  borderColor: owned.mode === 'rent' ? '#4dffa0' : '#4d3f66',
+                  color: owned.mode === 'rent' ? '#4dffa0' : '#cfc6e8',
+                  background: owned.mode === 'rent' ? '#12281e' : '#0b0816',
+                }}
+                onClick={() => g.setPropertyMode(def.id, 'rent')}
+              >
+                RENT OUT (+{propertyRentPayout(def, owned)}C)
+              </button>
+            </div>
+
+            {owned.mode === 'rent' ? (
+              <div style={{ display: 'grid', gap: 5 }}>
+                <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.14em' }}>LANDLORD RENT DIAL</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                  <button
+                    className="clickable btn"
+                    style={{
+                      width: '100%', padding: '7px 4px', fontSize: 10,
+                      borderColor: owned.rentRate === 'low' ? '#3ff0ff' : '#4d3f66',
+                      color: owned.rentRate === 'low' ? '#3ff0ff' : '#cfc6e8',
+                    }}
+                    onClick={() => g.setPropertyRentRate(def.id, 'low')}
+                  >
+                    LOW · +{lowPay}C (+REP)
+                  </button>
+                  <button
+                    className="clickable btn"
+                    style={{
+                      width: '100%', padding: '7px 4px', fontSize: 10,
+                      borderColor: owned.rentRate === 'fair' ? '#4dffa0' : '#4d3f66',
+                      color: owned.rentRate === 'fair' ? '#4dffa0' : '#cfc6e8',
+                    }}
+                    onClick={() => g.setPropertyRentRate(def.id, 'fair')}
+                  >
+                    FAIR · +{fairPay}C
+                  </button>
+                  <button
+                    className="clickable btn"
+                    style={{
+                      width: '100%', padding: '7px 4px', fontSize: 10,
+                      borderColor: owned.rentRate === 'high' ? '#ff4f6d' : '#4d3f66',
+                      color: owned.rentRate === 'high' ? '#ff4f6d' : '#cfc6e8',
+                    }}
+                    onClick={() => g.setPropertyRentRate(def.id, 'high')}
+                  >
+                    HIGH · +{highPay}C (-REP)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                className="clickable btn"
+                style={{ width: '100%', padding: '9px', fontSize: 11, borderColor: '#3ff0ff', color: '#3ff0ff' }}
+                onClick={() => { g.healAtProperty(); g.openPropertyPanel(null); }}
+              >
+                REST & RESTORE FULL INTEGRITY (FREE)
+              </button>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: owned.tier < 3 ? '1fr 1fr' : '1fr', gap: 8 }}>
+              {owned.tier < 3 && (
+                <button
+                  className="clickable btn"
+                  disabled={g.denarii < renCost}
+                  style={{
+                    width: '100%', padding: '8px', fontSize: 11,
+                    borderColor: '#ffc95c', color: '#ffc95c',
+                    opacity: g.denarii < renCost ? 0.45 : 1,
+                  }}
+                  onClick={() => g.renovateProperty(def.id)}
+                >
+                  RENOVATE T{owned.tier + 1} ({renCost}C)
+                </button>
+              )}
+              <button
+                className="clickable btn"
+                style={{ width: '100%', padding: '8px', fontSize: 11, borderColor: '#ff6b6b', color: '#ff6b6b' }}
+                onClick={() => g.sellProperty(def.id)}
+              >
+                SELL DEED (+{sellVal}C)
+              </button>
+            </div>
+          </div>
+        )}
+        <p style={{ fontSize: 10, opacity: 0.55, textAlign: 'center' }}>[ESC] to close</p>
+      </div>
+    </div>
+  );
+}
+
+/** PS1 Daggerfall-scale World Atlas & Instant Fast-Travel Map [M]. */
+function WorldAtlasPanel() {
+  const g = useGame();
+  const [selectedId, setSelectedId] = useState<string>('cache_city');
+  if (!g.atlasOpen) return null;
+
+  const selected = SETTLEMENTS.find((s) => s.id === selectedId) ?? CAPITALS[0];
+  const discovered = g.discoveredSettlements.includes(selected.id);
+  const localProps = PROPERTIES.filter((p) => p.settlementId === selected.id);
+  const ownedProps = Object.keys(g.ownedProperties)
+    .map((id) => PROPERTY_BY_ID.get(id))
+    .filter((x): x is NonNullable<typeof x> => Boolean(x));
+  const distToSelected = Math.round(Math.hypot(selected.x - g.worldPos.x, selected.z - g.worldPos.z));
+
+  const mapCoord = (v: number) => ((v + 2000) / 4000) * 320 + 20;
+
+  return (
+    <div className="panel clickable">
+      <div className="ps1-box" style={{ display: 'grid', gap: 12, width: 'min(780px, 95vw)', maxHeight: '88vh', overflowY: 'auto', textAlign: 'left' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #c99b4355', paddingBottom: 8 }}>
+          <div>
+            <h1 style={{ fontSize: 22, letterSpacing: '.24em', color: '#3ff0ff' }}>THE UNALLOCATED EXPANSE · ATLAS</h1>
+            <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.12em' }}>
+              DISCOVERED SECTORS: {g.discoveredSettlements.length}/{SETTLEMENTS.length} · ACTIVE BEACON: {g.nearestBeacon.name}
+            </div>
+          </div>
+          <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.setAtlasOpen(false)}>CLOSE</button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'start' }}>
+          {/* Tactical PS1 Vector Map */}
+          <svg
+            viewBox="0 0 360 360"
+            style={{ width: '100%', maxWidth: 360, background: '#05040d', border: '2px solid #c99b4388', justifySelf: 'center' }}
+          >
+            {[-1500, -1000, -500, 0, 500, 1000, 1500].map((v) => {
+              const c = mapCoord(v);
+              return (
+                <g key={v} opacity={v === 0 ? 0.35 : 0.16}>
+                  <line x1={c} y1={16} x2={c} y2={344} stroke="#3ff0ff" strokeWidth={1} />
+                  <line x1={16} y1={c} x2={344} y2={c} stroke="#3ff0ff" strokeWidth={1} />
+                </g>
+              );
+            })}
+            <text x="180" y="13" fill="#ffd866" fontSize="9" textAnchor="middle" letterSpacing="2">NORTH · KERNEL SPIRE</text>
+
+            {/* Satellite Settlements */}
+            {SETTLEMENTS.filter((s) => s.kind !== 'capital').map((s) => {
+              const cx = mapCoord(s.x);
+              const cz = mapCoord(s.z);
+              const known = g.discoveredSettlements.includes(s.id);
+              const isSel = selected.id === s.id;
+              return (
+                <g key={s.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedId(s.id)}>
+                  <circle
+                    cx={cx}
+                    cy={cz}
+                    r={isSel ? 6 : 4}
+                    fill={known ? s.accent : '#352f4d'}
+                    stroke={isSel ? '#ffffff' : '#05040d'}
+                    strokeWidth={1.5}
+                  />
+                </g>
+              );
+            })}
+
+            {/* 5 Capital Cities + Colosseum Beacon Ring */}
+            {CAPITALS.map((c) => {
+              const cx = mapCoord(c.x);
+              const cz = mapCoord(c.z);
+              const isBeacon = g.nearestBeacon.id === c.id;
+              const isSel = selected.id === c.id;
+              return (
+                <g key={c.id} style={{ cursor: 'pointer' }} onClick={() => setSelectedId(c.id)}>
+                  {isBeacon && <circle cx={cx} cy={cz} r={12} fill="none" stroke={c.colosseum?.color ?? c.accent} strokeWidth={1.6} strokeDasharray="3 2" />}
+                  <polygon
+                    points={`${cx},${cz - 7} ${cx + 6},${cz} ${cx},${cz + 7} ${cx - 6},${cz}`}
+                    fill={c.accent}
+                    stroke={isSel ? '#ffffff' : '#05040d'}
+                    strokeWidth={1.5}
+                  />
+                  <text x={cx} y={cz + 16} fill={c.accent} fontSize="8" textAnchor="middle" fontWeight="bold">
+                    {c.name.replace('THE ', '')}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Owned Property Gold Pins */}
+            {ownedProps.map((p) => (
+              <rect
+                key={p.id}
+                x={mapCoord(p.x) - 3}
+                y={mapCoord(p.z) - 3}
+                width={6}
+                height={6}
+                fill="#4dffa0"
+                stroke="#05040d"
+                strokeWidth={1}
+              />
+            ))}
+
+            {/* Live Player Position Cursor */}
+            <g>
+              <circle cx={mapCoord(g.worldPos.x)} cy={mapCoord(g.worldPos.z)} r={5.5} fill="none" stroke="#ffffff" strokeWidth={1.6} />
+              <circle cx={mapCoord(g.worldPos.x)} cy={mapCoord(g.worldPos.z)} r={2.5} fill="#3ff0ff" />
+            </g>
+          </svg>
+
+          {/* Inspector & Fast Travel Sidebar */}
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ padding: '10px 12px', background: '#07050e', border: `1px solid ${discovered ? selected.accent : '#4d3f66'}`, display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+                <span style={{ color: selected.safety === 'frontier' ? '#ff4f6d' : '#4dffa0', letterSpacing: '.12em' }}>
+                  {selected.safety === 'frontier' ? 'LAWLESS FRONTIER' : 'SANCTUARY HUB'}
+                </span>
+                <span style={{ color: '#ffc95c' }}>{distToSelected}m AWAY</span>
+              </div>
+              <div style={{ fontSize: 17, color: discovered ? selected.accent : '#8c81a8', fontWeight: 700, letterSpacing: '.14em' }}>
+                {discovered ? selected.name : 'UNCHARTED SIGNAL'}
+              </div>
+              <div style={{ fontSize: 11, color: '#a99dc4' }}>{discovered ? selected.code : 'Ride within 120m to map this sector'}</div>
+              <p style={{ fontSize: 11, color: '#e9e6ff' }}>{discovered ? selected.description : 'Point your Light-Cycle across the curved horizon to discover this settlement.'}</p>
+
+              {selected.colosseum && (
+                <div style={{ fontSize: 11, color: selected.colosseum.color, borderTop: '1px solid #4d3f66', paddingTop: 6 }}>
+                  COLOSSEUM: {selected.colosseum.name}
+                </div>
+              )}
+
+              <div style={{ fontSize: 10, color: '#ffc95c' }}>
+                PROPERTIES HERE: {localProps.length} ({localProps.filter((p) => Boolean(g.ownedProperties[p.id])).length} OWNED)
+              </div>
+
+              <button
+                className="clickable btn"
+                disabled={!discovered}
+                style={{
+                  width: '100%', padding: '10px', fontSize: 12, marginTop: 4,
+                  borderColor: discovered ? '#3ff0ff' : '#4d3f66',
+                  color: discovered ? '#3ff0ff' : '#8c81a8',
+                  opacity: discovered ? 1 : 0.45,
+                }}
+                onClick={() => g.fastTravelTo(selected.spawnX, selected.spawnZ, selected.name)}
+              >
+                {discovered ? `FAST TRAVEL → ${selected.name}` : 'DISCOVER TO FAST TRAVEL'}
+              </button>
+            </div>
+
+            <div style={{ padding: '9px 12px', background: '#07050e', border: '1px solid #4d3f66', display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 10, color: '#4dffa0', letterSpacing: '.14em' }}>
+                MY PROPERTIES ({ownedProps.length})
+              </div>
+              {ownedProps.length === 0 ? (
+                <div style={{ fontSize: 10, color: '#a99dc4' }}>
+                  No deeds owned yet. Look for golden FOR SALE signs around town!
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 4, maxHeight: 145, overflowY: 'auto' }}>
+                  {ownedProps.map((p) => {
+                    const st = g.ownedProperties[p.id];
+                    return (
+                      <button
+                        key={p.id}
+                        className="clickable btn"
+                        style={{
+                          width: '100%', padding: '6px 8px', fontSize: 10, textAlign: 'left',
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          borderColor: st.mode === 'live' ? '#3ff0ff' : '#4dffa0',
+                          color: '#e9e6ff',
+                        }}
+                        onClick={() => g.fastTravelTo(p.signX, p.signZ + 2, p.name)}
+                      >
+                        <span>{p.name} ({p.settlementName})</span>
+                        <span style={{ color: st.mode === 'live' ? '#3ff0ff' : '#4dffa0' }}>
+                          {st.mode === 'live' ? 'HOME · WARP' : `+${propertyRentPayout(p, st)}C · WARP`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        <p style={{ fontSize: 10, opacity: 0.55, textAlign: 'center' }}>[M] or [ESC] to close</p>
       </div>
     </div>
   );
@@ -971,9 +1402,10 @@ function KeyCap({ k, label }: { k: string; label: string }) {
 }
 
 function ArenaHud() {
-  const { scene, setScene, loadout, flasks, dailyBuffs, selectedCard, lastResult, activeQuests } = useGame();
+  const { scene, setScene, loadout, flasks, dailyBuffs, selectedCard, lastResult, activeQuests, activeColosseumId } = useGame();
   const a = useArena();
   if (scene !== 'arena') return null;
+  const activeCol = COLOSSEUMS.find((c) => c.id === activeColosseumId) ?? COLOSSEUMS[0];
   const gear = resolveLoadout(loadout);
   const readyQuests = activeQuests.filter((q) => q.progress >= q.target).length;
   const leave = () => {
@@ -1055,9 +1487,9 @@ function ArenaHud() {
       <CalloutFlash />
       {a.phase === 'intro' && (
         <div className="panel" style={{ background: 'transparent' }}>
-          <div className="ps1-box" style={{ padding: '16px 36px' }}>
-            <h1>{selectedCard ? selectedCard.title : `BOUT ${a.bout}`}</h1>
-            <p style={{ marginTop: 6, color: '#e9e6ff' }}>ENTER THE PURGE GRID</p>
+          <div className="ps1-box" style={{ padding: '16px 36px', borderColor: activeCol.color }}>
+            <h1 style={{ color: activeCol.color }}>{selectedCard ? selectedCard.title : `BOUT ${a.bout}`}</h1>
+            <p style={{ marginTop: 6, color: '#e9e6ff' }}>ENTER {activeCol.name}</p>
           </div>
         </div>
       )}
@@ -1115,33 +1547,55 @@ function ArenaHud() {
 
 export function HUD() {
   const near = useGame((s) => s.near);
+  const nearPropertyId = useGame((s) => s.nearPropertyId);
+  const nearColosseumId = useGame((s) => s.nearColosseumId);
   const panel = useGame((s) => s.panel);
+  const atlasOpen = useGame((s) => s.atlasOpen);
+  const activePropertyId = useGame((s) => s.activePropertyId);
   const scene = useGame((s) => s.scene);
+  const currentRegionName = useGame((s) => s.currentRegionName);
   const arrestPrompt = useGame((s) => s.arrestPrompt);
   const inJail = useGame((s) => s.inJail);
   const station = STATIONS.find((s) => s.id === near);
+  const nearCol = nearColosseumId ? COLOSSEUMS.find((c) => c.id === nearColosseumId) : null;
+  const nearProp = nearPropertyId ? PROPERTY_BY_ID.get(nearPropertyId) : null;
+  const modalOpen = Boolean(panel || atlasOpen || activePropertyId || arrestPrompt || inJail);
+
+  const hint = nearCol
+    ? { color: nearCol.color, text: `[ENTER] ENTER ${nearCol.name}` }
+    : nearProp
+      ? { color: '#ffc95c', text: `[ENTER] INSPECT DEED · ${nearProp.name}` }
+      : station
+        ? { color: station.color, text: `[ENTER] ${station.verb}` }
+        : null;
+
+  const activeColosseumId = useGame((s) => s.activeColosseumId);
+  const activeCol = COLOSSEUMS.find((c) => c.id === activeColosseumId) ?? COLOSSEUMS[0];
   return (
     <div className="hud">
-      <div className="title">BONEYARD · {scene === 'ludus' ? 'SECTOR /DEV/NULL' : 'PURGE GRID'}</div>
+      <div className="title">BONEYARD · {scene === 'ludus' ? currentRegionName : activeCol.name}</div>
       <TopRightControls />
       <TownStatusStrip />
       <StreetOverlays />
-      {station && !panel && !arrestPrompt && !inJail && (
-        <div className="hint" style={{ borderColor: station.color, color: station.color }}>[ENTER] {station.verb}</div>
+      {hint && !modalOpen && (
+        <div className="hint" style={{ borderColor: hint.color, color: hint.color }}>{hint.text}</div>
       )}
       {scene === 'ludus' && (
         <div className="controls">
           <KeyCap k="WASD" label="Move" />
+          <KeyCap k="V" label="Cycle" />
+          <KeyCap k="M" label="Atlas" />
           <KeyCap k="T" label="Greet" />
           <KeyCap k="G" label="Provoke" />
           <KeyCap k="X" label="Blade" />
-          <KeyCap k="J/K" label="Strike" />
           <KeyCap k="C" label="Gear/Specs" />
-          <KeyCap k="ENTER" label="Terminal" />
+          <KeyCap k="ENTER" label="Interact" />
           <KeyCap k="P" label="CRT" />
         </div>
       )}
       <StationPanel />
+      <PropertyPanel />
+      <WorldAtlasPanel />
       <ArenaHud />
     </div>
   );

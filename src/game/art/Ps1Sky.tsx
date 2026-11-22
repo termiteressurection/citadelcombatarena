@@ -6,10 +6,19 @@ import { getPs1Texture, makePs1Material } from './ps1Textures';
 
 export type SkyMood = 'ludus' | 'arena' | 'town_morning' | 'town_dusk' | 'city_cycle' | 'city_purge';
 
-/** Quantized low-poly PS1 TRON megacity sky dome with digital processor disc & distant skyline spires. */
-export function Ps1Sky({ mood = 'city_cycle' }: { mood?: SkyMood }) {
+/** Quantized low-poly PS1 TRON megacity sky dome with digital processor disc & optional distant skyline spires. */
+export function Ps1Sky({
+  mood = 'city_cycle',
+  playerPosRef,
+  openWorld = false,
+}: {
+  mood?: SkyMood;
+  playerPosRef?: React.MutableRefObject<THREE.Vector3>;
+  openWorld?: boolean;
+}) {
+  const skyGroup = useRef<THREE.Group>(null!);
   const skyGeo = useMemo(() => {
-    const geo = new THREE.SphereGeometry(320, 20, 10);
+    const geo = new THREE.SphereGeometry(openWorld ? 460 : 320, 20, 10);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const isMorning = mood === 'town_morning';
@@ -25,9 +34,10 @@ export function Ps1Sky({ mood = 'city_cycle' }: { mood?: SkyMood }) {
     );
     const tmp = new THREE.Color();
 
+    const rScale = openWorld ? 460 : 320;
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
-      const t = THREE.MathUtils.clamp(y / 320, 0, 1);
+      const t = THREE.MathUtils.clamp(y / rScale, 0, 1);
       const q = Math.floor(t * 7) / 7;
       if (q < 0.35) tmp.copy(horizon).lerp(mid, q / 0.35);
       else tmp.copy(mid).lerp(zenith, (q - 0.35) / 0.65);
@@ -37,7 +47,13 @@ export function Ps1Sky({ mood = 'city_cycle' }: { mood?: SkyMood }) {
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     return geo;
-  }, [mood]);
+  }, [mood, openWorld]);
+
+  useFrame(() => {
+    if (skyGroup.current && playerPosRef) {
+      skyGroup.current.position.set(playerPosRef.current.x, 0, playerPosRef.current.z);
+    }
+  });
 
   const isMorning = mood === 'town_morning';
   const isPurge = mood === 'city_purge';
@@ -67,48 +83,50 @@ export function Ps1Sky({ mood = 'city_cycle' }: { mood?: SkyMood }) {
   }, []);
 
   return (
-    <group>
-      <mesh geometry={skyGeo}>
+    <group ref={skyGroup}>
+      <mesh geometry={skyGeo} frustumCulled={false}>
         <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} />
       </mesh>
 
       {/* Pixelated Digital Processor Sun / System Core */}
-      <group position={isPurge ? [-62, 86, -210] : [58, 92, -210]}>
+      <group position={isPurge ? [-62, 108, -280] : [58, 114, -280]}>
         <mesh>
-          <octahedronGeometry args={[14, 0]} />
+          <octahedronGeometry args={[16, 0]} />
           <meshBasicMaterial color={coreColor} fog={false} />
         </mesh>
         <mesh rotation={[0.25, 0.25, 0]}>
-          <ringGeometry args={[18, 22, 8]} />
+          <ringGeometry args={[20, 25, 8]} />
           <meshBasicMaterial color={haloColor} transparent opacity={0.34} side={THREE.DoubleSide} fog={false} />
         </mesh>
         <mesh rotation={[-0.2, 0.6, 0]}>
-          <ringGeometry args={[25, 27, 12]} />
+          <ringGeometry args={[28, 30, 12]} />
           <meshBasicMaterial color={rimColor} transparent opacity={0.22} side={THREE.DoubleSide} fog={false} />
         </mesh>
       </group>
 
-      {/* Distant Night City Megatower Skyline Ring */}
-      <group>
-        {towers.map((s, i) => (
-          <group key={i} position={[s.x, -26, s.z]} rotation={[0, s.ry, 0]}>
-            <mesh position={[0, s.h / 2, 0]}>
-              <boxGeometry args={[s.w, s.h, 6]} />
-              <meshBasicMaterial color={silColor} fog={false} />
-            </mesh>
-            <mesh position={[0, s.h - 2, 3.05]}>
-              <boxGeometry args={[s.w * 0.72, 0.9, 0.3]} />
-              <meshBasicMaterial color={i % 2 === 0 ? rimColor : '#ffc95c'} fog={false} />
-            </mesh>
-            {s.spire && (
-              <mesh position={[0, s.h + 8, 0]}>
-                <cylinderGeometry args={[0.15, 0.6, 16, 4]} />
-                <meshBasicMaterial color={rimColor} fog={false} />
+      {/* Distant Night City Megatower Skyline Ring (arena / close backdrop only) */}
+      {!openWorld && (
+        <group>
+          {towers.map((s, i) => (
+            <group key={i} position={[s.x, -26, s.z]} rotation={[0, s.ry, 0]}>
+              <mesh position={[0, s.h / 2, 0]}>
+                <boxGeometry args={[s.w, s.h, 6]} />
+                <meshBasicMaterial color={silColor} fog={false} />
               </mesh>
-            )}
-          </group>
-        ))}
-      </group>
+              <mesh position={[0, s.h - 2, 3.05]}>
+                <boxGeometry args={[s.w * 0.72, 0.9, 0.3]} />
+                <meshBasicMaterial color={i % 2 === 0 ? rimColor : '#ffc95c'} fog={false} />
+              </mesh>
+              {s.spire && (
+                <mesh position={[0, s.h + 8, 0]}>
+                  <cylinderGeometry args={[0.15, 0.6, 16, 4]} />
+                  <meshBasicMaterial color={rimColor} fog={false} />
+                </mesh>
+              )}
+            </group>
+          ))}
+        </group>
+      )}
     </group>
   );
 }
