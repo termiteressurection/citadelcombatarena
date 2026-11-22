@@ -116,7 +116,7 @@ export interface Station {
 
 export const STATIONS: Station[] = [
   { id: 'bunk', label: 'SAFE SECTOR POD', verb: 'DEFRAG & NEXT CYCLE', pos: [-18, 32], color: '#a78bfa',
-    solids: [{ x: -18, z: 32, r: 1.9 }] },
+    solids: [{ x: -20.1, z: 31.8, r: 0.65 }, { x: -15.9, z: 31.8, r: 0.65 }, { x: -18, z: 30.1, r: 0.75 }] },
   { id: 'locker', label: 'MEMORY LOCKER', verb: 'LOADOUT & SPECS [C]', pos: [18, 32], color: '#ffc95c',
     solids: [{ x: 18, z: 32, r: 1.6 }] },
   { id: 'yard', label: 'SIM TRAINING NODE', verb: 'COMBAT DRILL', pos: [-26, 12], color: '#ff6b6b',

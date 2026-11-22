@@ -37,6 +37,7 @@ export interface CityNpc {
   hasVehicle: boolean;
   onVehicle: boolean;
   vehicleLean: number;
+  parkedCycle?: { x: number; z: number; yaw: number } | null;
   collapseT?: number;
   collapseDx?: number;
   collapseDz?: number;
@@ -183,6 +184,43 @@ export function advanceNpcSchedule(npc: CityNpc, nextPt: { x: number; z: number 
   npc.targetZ = nextPt.z;
   const dist = Math.hypot(nextPt.x - npc.x, nextPt.z - npc.z);
   npc.onVehicle = npc.hasVehicle && npc.mood === 'calm' && dist > 16;
+  npc.parkedCycle = npc.onVehicle ? null : npc.hasVehicle ? {
+    x: npc.x + Math.cos(npc.yaw) * 1.45,
+    z: npc.z - Math.sin(npc.yaw) * 1.45,
+    yaw: npc.yaw,
+  } : null;
+}
+
+/** Computes right-hand lane discipline & forward yielding/braking around the player and slower riders ahead. */
+export function stepNpcTrafficYield(
+  npc: CityNpc,
+  playerX: number,
+  playerZ: number,
+  allNpcs: CityNpc[],
+): { speedMul: number; laneOffset: number } {
+  if (!npc.onVehicle) return { speedMul: 1, laneOffset: 0 };
+  const fx = Math.sin(npc.yaw);
+  const fz = Math.cos(npc.yaw);
+  const rx = Math.cos(npc.yaw);
+  const rz = -Math.sin(npc.yaw);
+  let speedMul = 1.0;
+
+  const checkObstacle = (ox: number, oz: number) => {
+    const dx = ox - npc.x;
+    const dz = oz - npc.z;
+    const ahead = dx * fx + dz * fz;
+    const lateral = Math.abs(dx * rx + dz * rz);
+    if (ahead > 0.2 && ahead < 7.8 && lateral < 2.3) {
+      speedMul = Math.min(speedMul, ahead < 3.4 ? 0.2 : 0.56);
+    }
+  };
+
+  checkObstacle(playerX, playerZ);
+  for (const other of allNpcs) {
+    if (other.id === npc.id || other.mood === 'dead') continue;
+    checkObstacle(other.x, other.z);
+  }
+  return { speedMul, laneOffset: 1.8 };
 }
 
 function seedLife(id: number, role: NpcRole, x: number, z: number, tx: number, tz: number) {

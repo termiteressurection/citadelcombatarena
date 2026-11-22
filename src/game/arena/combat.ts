@@ -1,10 +1,27 @@
 /** Pure combat rules. No rendering, no physics: everything here is unit-tested. */
 import { type ArmorKey, type StyleId } from './styles';
-import { gearFromStyle, type ResolvedGear } from '../rpg/items';
+import { gearFromStyle, type EchoCoreId, type ResolvedGear, type WeaponFamily } from '../rpg/items';
 
 export type Kind = 'player' | 'skirmisher' | 'brute' | 'champion';
 export type State = 'idle' | 'windup' | 'strike' | 'recover' | 'dodge' | 'stagger' | 'dead';
 export type Atk = 'light' | 'light2' | 'light3' | 'heavy' | 'bash';
+export type HitReaction = 'head_snap' | 'chest_recoil' | 'gut_crunch' | 'leg_trip';
+export type FinisherChoreo = 'gladius_throat' | 'spear_impale' | 'twin_scissor' | 'hammer_flatten' | 'trident_pin';
+
+export function reactionForZone(zone: LimbKey, heavy: boolean): HitReaction {
+  if (zone === 'head') return 'head_snap';
+  if (zone === 'legL' || zone === 'legR') return 'leg_trip';
+  if (zone === 'torso' && heavy) return 'gut_crunch';
+  return 'chest_recoil';
+}
+
+export function finisherChoreoForWeapon(family: WeaponFamily): FinisherChoreo {
+  if (family === 'spear') return 'spear_impale';
+  if (family === 'twinSica') return 'twin_scissor';
+  if (family === 'warhammer') return 'hammer_flatten';
+  if (family === 'trident') return 'trident_pin';
+  return 'gladius_throat';
+}
 
 export type LimbKey = 'head' | 'torso' | 'armL' | 'armR' | 'legL' | 'legR';
 export const LIMB_KEYS: readonly LimbKey[] = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
@@ -142,6 +159,10 @@ export interface Fighter {
   juggleCount: number;
   diveKicking: boolean;
   wallSplat: number;
+  hitReaction?: HitReaction;
+  hitReactionT?: number;
+  finisherChoreo?: FinisherChoreo;
+  finisherT?: number;
   state: State; atk: Atk | null; t: number; stagger: number;
   blocking: boolean; blockT: number; iframes: number;
   parryHold: number; parryCd: number; riposte: number; riposteActive: boolean;
@@ -170,6 +191,7 @@ export interface HitEvent {
   zone: LimbKey; broken?: LimbKey; severed?: LimbKey; decap?: boolean;
   armorBroken?: ArmorKey; snared?: boolean; riposte?: boolean;
   weaponDropped?: boolean; launched?: boolean; juggled?: boolean; diveKick?: boolean; thrownHit?: boolean;
+  hitReaction?: HitReaction; finisherChoreo?: FinisherChoreo; coreEffect?: EchoCoreId;
 }
 
 export function makeFighter(id: number, kind: Kind, x: number, z: number, mods: Mods = defaultMods(), style?: StyleId, gear?: ResolvedGear): Fighter {
@@ -327,6 +349,8 @@ export function stepFighter(f: Fighter, i: Intent, dt: number, target: Fighter |
   f.snared = Math.max(0, f.snared - dt);
   f.dazed = Math.max(0, f.dazed - dt);
   f.wallSplat = Math.max(0, f.wallSplat - dt);
+  f.hitReactionT = Math.max(0, (f.hitReactionT ?? 0) - dt);
+  f.finisherT = Math.max(0, (f.finisherT ?? 0) - dt);
   f.stanceAge += dt;
   if (i.stance && i.stance !== f.guardHeight) {
     f.guardHeight = i.stance;
@@ -657,6 +681,10 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
     }
 
     const zone = pickTargetZone(a.atk, v, atkHeight);
+    const coreId = st.coreId ?? 'none';
+    const reaction = reactionForZone(zone, heavy);
+    v.hitReaction = reaction;
+    v.hitReactionT = 0.42;
     v.hp -= dmg;
 
     // Armor mitigation & shatter (helm covers head, pauldron covers arms/torso)
@@ -676,6 +704,23 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
     if (st.netHeavy && heavy) {
       v.snared = 1.8;
       snared = true;
+    }
+
+    // Echo Core weapon socketing effects
+    let coreEffect: EchoCoreId | undefined;
+    if (coreId === 'frame_freeze' && (heavy || riposteHit)) {
+      v.snared = Math.max(v.snared, 1.6);
+      snared = true;
+      coreEffect = 'frame_freeze';
+    } else if (coreId === 'cycle_siphon' && (heavy || riposteHit)) {
+      a.hp = Math.min(a.maxHp, a.hp + 6);
+      a.stamina = Math.min(a.maxStamina, a.stamina + 10);
+      coreEffect = 'cycle_siphon';
+    } else if (coreId === 'volt_arc' && heavy) {
+      v.dazed = Math.max(v.dazed, 1.1);
+      coreEffect = 'volt_arc';
+    } else if (coreId === 'corrupt_bleed') {
+      coreEffect = 'corrupt_bleed';
     }
 
     const limb = v.limbs[zone];
@@ -732,6 +777,7 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
       out.push({
         ...base, type: 'kill', dmg, zone, broken, severed, decap, armorBroken, snared,
         riposte: riposteHit || undefined, weaponDropped: weaponDropped || undefined, diveKick: diveKick || undefined,
+        hitReaction: reaction, coreEffect,
       });
     } else {
       stagger(v, launched || juggled ? 0.85 : diveKick ? 0.72 : broken ? 0.65 : heavy ? 0.45 : at.guardBreak ? 0.35 : 0.18);
@@ -742,6 +788,7 @@ export function resolveStrike(a: Fighter, victims: Fighter[]): HitEvent[] {
         ...base, type: 'hit', dmg, zone, broken, severed, armorBroken, snared,
         riposte: riposteHit || undefined, weaponDropped: weaponDropped || undefined,
         launched: launched || undefined, juggled: juggled || undefined, diveKick: diveKick || undefined,
+        hitReaction: reaction, coreEffect,
       });
     }
   }
@@ -969,11 +1016,14 @@ export function tryExecute(a: Fighter, victims: Fighter[]): HitEvent | null {
   const ux = dx / d;
   const uz = dz / d;
 
+  const finisherChoreo = finisherChoreoForWeapon(gearOf(a).visuals.weapon);
   a.x = target.x - ux * 1.2;
   a.z = target.z - uz * 1.2;
   a.yaw = Math.atan2(ux, uz);
   a.state = 'recover';
   a.atk = 'heavy';
+  a.finisherChoreo = finisherChoreo;
+  a.finisherT = 0.65;
   a.t = 0;
   a.blocking = false;
   a.parryHold = 0;
@@ -1009,6 +1059,7 @@ export function tryExecute(a: Fighter, victims: Fighter[]): HitEvent | null {
     severed: 'head',
     decap: true,
     riposte: true,
+    finisherChoreo,
   };
 }
 

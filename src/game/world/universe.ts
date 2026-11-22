@@ -803,7 +803,111 @@ export function nearestSettlementTerminal(x: number, z: number, range = 4.8): Se
   return null;
 }
 
-/** Combines Cache City SOLIDS (near origin), local settlement buildings, Colosseum gate pillars, service terminals, and property solids. */
+export interface HighwaySegment {
+  id: string;
+  fromId: string;
+  toId: string;
+  x1: number;
+  z1: number;
+  x2: number;
+  z2: number;
+  color: string;
+  secondary: string;
+  length: number;
+  ux: number;
+  uz: number;
+}
+
+const HIGHWAY_LINKS: readonly [string, string][] = [
+  ['cache_city', 'drift_bazaars'],
+  ['cache_city', 'cold_vaults'],
+  ['cache_city', 'rust_citadel'],
+  ['cache_city', 'kernel_spire'],
+  ['cache_city', 'oak_cache'],
+  ['cache_city', 'pine_bak'],
+  ['cache_city', 'memory_mill'],
+  ['cache_city', 'conduit_crossing'],
+  ['drift_bazaars', 'scrapford'],
+  ['drift_bazaars', 'lantern_rest'],
+  ['drift_bazaars', 'copper_ridge'],
+  ['drift_bazaars', 'rim_tavern'],
+  ['drift_bazaars', 'south_terminus'],
+  ['cold_vaults', 'glass_hollow'],
+  ['cold_vaults', 'old_save_abbey'],
+  ['cold_vaults', 'echo_mill'],
+  ['cold_vaults', 'white_sector'],
+  ['rust_citadel', 'iron_heap'],
+  ['rust_citadel', 'rustwatch_keep'],
+  ['rust_citadel', 'wreck_v01'],
+  ['rust_citadel', 'ash_gate'],
+  ['rust_citadel', 'dead_sector_9'],
+  ['kernel_spire', 'halo_terrace'],
+  ['kernel_spire', 'checksum_shrine'],
+  ['oak_cache', 'scrapford'],
+  ['pine_bak', 'glass_hollow'],
+  ['conduit_crossing', 'iron_heap'],
+  ['echo_mill', 'halo_terrace'],
+  ['ash_gate', 'checksum_shrine'],
+];
+
+const SETTLEMENT_LOOKUP = new Map(SETTLEMENTS.map((s) => [s.id, s]));
+
+export const HIGHWAY_SEGMENTS: HighwaySegment[] = HIGHWAY_LINKS.flatMap(([fromId, toId]) => {
+  const a = SETTLEMENT_LOOKUP.get(fromId);
+  const b = SETTLEMENT_LOOKUP.get(toId);
+  if (!a || !b) return [];
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const fullLen = Math.hypot(dx, dz) || 1;
+  const ux = dx / fullLen;
+  const uz = dz / fullLen;
+  const trimA = a.id === 'cache_city' ? 56 : a.radius * 0.52;
+  const trimB = b.id === 'cache_city' ? 56 : b.radius * 0.52;
+  const x1 = a.x + ux * trimA;
+  const z1 = a.z + uz * trimA;
+  const x2 = b.x - ux * trimB;
+  const z2 = b.z - uz * trimB;
+  const length = Math.max(10, Math.hypot(x2 - x1, z2 - z1));
+  return [{
+    id: `${fromId}__${toId}`,
+    fromId,
+    toId,
+    x1,
+    z1,
+    x2,
+    z2,
+    color: a.accent,
+    secondary: b.accent,
+    length,
+    ux,
+    uz,
+  }];
+});
+
+export function nearestHighwayPoint(x: number, z: number): { seg: HighwaySegment; x: number; z: number; dist: number } {
+  let best = HIGHWAY_SEGMENTS[0];
+  let bestX = best.x1;
+  let bestZ = best.z1;
+  let bestD = Infinity;
+  for (const seg of HIGHWAY_SEGMENTS) {
+    const t = Math.max(0, Math.min(seg.length, (x - seg.x1) * seg.ux + (z - seg.z1) * seg.uz));
+    const px = seg.x1 + seg.ux * t;
+    const pz = seg.z1 + seg.uz * t;
+    const d = Math.hypot(x - px, z - pz);
+    if (d < bestD) {
+      bestD = d;
+      best = seg;
+      bestX = px;
+      bestZ = pz;
+    }
+  }
+  return { seg: best, x: bestX, z: bestZ, dist: bestD };
+}
+
+const GHOST_VILLAGE_IDS = new Set<string>(['wreck_v01', 'ash_gate', 'dead_sector_9', 'iron_heap']);
+export const isGhostVillage = (settlementId: string): boolean => GHOST_VILLAGE_IDS.has(settlementId);
+
+/** Combines Cache City SOLIDS (near origin), local settlement buildings, Colosseum gate pillars, service terminals, and walk-inside property alcoves. */
 export function collidersNear(x: number, z: number): Circle[] {
   const out: Circle[] = [];
   if (Math.hypot(x, z) < 170) out.push(...SOLIDS);
@@ -824,7 +928,10 @@ export function collidersNear(x: number, z: number): Circle[] {
 
   for (const p of PROPERTY_SLOTS) {
     if (Math.hypot(x - p.x, z - p.z) < 140) {
-      out.push({ x: p.x, z: p.z, r: p.colliderR });
+      // Open-front walk-inside sanctuary alcove walls (south doorway stays open!)
+      out.push({ x: p.x - 2.1, z: p.z - 0.3, r: 0.95 });
+      out.push({ x: p.x + 2.1, z: p.z - 0.3, r: 0.95 });
+      out.push({ x: p.x, z: p.z - 1.9, r: 1.05 });
       out.push({ x: p.signX, z: p.signZ, r: 0.45 });
     }
   }

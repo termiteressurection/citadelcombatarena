@@ -38,6 +38,7 @@ interface ArenaHud {
   playerLimbs: LimbHud; enemies: EnemyBar[];
   boons: string[]; draft: string[]; carryHp: number; carryMax: number; earned: number;
   lockedName: string | null; combo: number; executeReady: boolean; stance: StanceHeight; armed: boolean; callout: Callout | null;
+  crowdFavor: number; tauntCd: number; crowdBlessing: string | null;
   set: (p: Partial<ArenaHud>) => void;
   startRun: () => void;
   pick: (id: string) => void;
@@ -48,6 +49,7 @@ const fresh = {
   playerLimbs: fullLimbHud(), enemies: [] as EnemyBar[],
   boons: [] as string[], draft: [] as string[], carryHp: 0, carryMax: 0, earned: 0,
   lockedName: null as string | null, combo: 0, executeReady: false, stance: 'mid' as StanceHeight, armed: true, callout: null as Callout | null,
+  crowdFavor: 20, tauntCd: 0, crowdBlessing: null as string | null,
 };
 
 export const useArena = create<ArenaHud>((set, get) => ({

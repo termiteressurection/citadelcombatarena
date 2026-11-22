@@ -80,6 +80,11 @@ interface ArenaWorld {
   spectatorSpeed: 1 | 2;
   spectatorCamMode: 'side' | 'orbit';
   cheerCd: number;
+  crowdFavor: number;
+  tauntT: number;
+  tauntCd: number;
+  specialKind: 'v01_boss' | 'garbage_collector' | 'nemesis' | 'grand_prix' | null;
+  nemesisCyberLimbs?: Partial<Record<LimbKey, boolean>>;
 }
 
 function resolveQueryStyle(): StyleId | null {
@@ -107,6 +112,8 @@ function newWorld(
 ): ArenaWorld {
   const queryStyle = resolveQueryStyle();
   const spectator = gs.spectatorBout;
+  const specialKind = gs.specialBoutKind;
+  const nemesisRival = specialKind === 'nemesis' ? gs.nemesisRoster[gs.activeColosseumId] : undefined;
   let fighters: Fighter[] = [];
   let weaponFamily: WeaponFamily = queryStyle ? STYLE_FAMILY[queryStyle] : itemById(WEAPONS, gs.loadout.weaponId).family;
 
@@ -137,8 +144,16 @@ function newWorld(
     if (card) {
       card.enemies.forEach((item, i) => {
         const eGear = item.loadout ? resolveLoadout(item.loadout) : gearFromStyle(item.style);
-        const e = makeFighter(i + 1, item.kind, (i - (card.enemies.length - 1) / 2) * 4, -8, defaultMods(), item.style, eGear);
-        e.stats = { ...e.stats, name: item.name, color: eGear.color };
+        const eMods = defaultMods();
+        if (specialKind === 'garbage_collector' && i === 0) eMods.maxHp = 180;
+        else if (specialKind === 'nemesis' && nemesisRival) eMods.maxHp = nemesisRival.level * 28;
+        else if (specialKind === 'v01_boss') eMods.maxHp = 95;
+        const e = makeFighter(i + 1, item.kind, (i - (card.enemies.length - 1) / 2) * 4, -8, eMods, item.style, eGear);
+        e.stats = {
+          ...e.stats,
+          name: item.name,
+          color: specialKind === 'v01_boss' ? '#4dffa0' : nemesisRival?.color ?? eGear.color,
+        };
         fighters.push(e);
       });
     } else {
@@ -154,6 +169,7 @@ function newWorld(
     bout, freed: false, card,
     kills: 0, parries: 0, armorsBroken: 0, limbsSevered: 0, usedFlask: false, weaponFamily,
     spectator, spectatorSpeed: 1, spectatorCamMode: 'side', cheerCd: 0,
+    crowdFavor: 20, tauntT: 0, tauntCd: 0, specialKind, nemesisCyberLimbs: nemesisRival?.cyberLimbs,
     phys: createArenaWorld(), fighters, ragdolls: [], debris: [],
     shards: new ShardPool(), slashes: new SlashPool(), ghosts: new GhostPool(),
     hitstop: 0, slowMo: 0, shake: 0, fovKick: 0, time: 0, acc: 0,
@@ -176,6 +192,30 @@ const getLockedTarget = (w: ArenaWorld): Fighter | null => {
   return f ?? nearestFoe(w.fighters[0], w.fighters);
 };
 
+function addCrowdFavor(w: ArenaWorld, amount: number) {
+  if (w.spectator || amount <= 0) return;
+  const p = w.fighters[0];
+  if (!p || p.state === 'dead') return;
+  w.crowdFavor = Math.min(100, w.crowdFavor + amount);
+  if (w.crowdFavor >= 100) {
+    w.crowdFavor = 0;
+    p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.25));
+    p.stamina = Math.min(p.maxStamina, p.stamina + 40);
+    p.mods = { ...p.mods, dmg: p.mods.dmg + 0.12 };
+    w.weaponProps.push(spawnDroppedWeapon(p, 0, -1, ++w.nextPropId));
+    w.propVersion++;
+    sfx.restoreWave();
+    w.shards.burst(p.x, 1.8, p.z, 34, 11, '#ffd866');
+    useArena.getState().set({
+      crowdFavor: 0,
+      crowdBlessing: 'CROWD OVERCLOCK GIFT! +25% HP & +12% DMG',
+      callout: { text: 'CROWD OVERCLOCK GIFT!', color: '#ffd866', id: ++w.calloutId },
+    });
+  } else {
+    useArena.getState().set({ crowdFavor: Math.round(w.crowdFavor) });
+  }
+}
+
 function onHit(w: ArenaWorld, e: HitEvent) {
   const hud = useArena.getState();
   const v = w.fighters.find((f) => f.id === e.victim)!;
@@ -188,7 +228,10 @@ function onHit(w: ArenaWorld, e: HitEvent) {
   }
   if (e.type === 'parry') {
     sfx.parry();
-    if (v.team === 'p') w.parries++;
+    if (v.team === 'p') {
+      w.parries++;
+      addCrowdFavor(w, 18);
+    }
     w.hitstop = Math.max(w.hitstop, 0.18); w.slowMo = Math.max(w.slowMo, 0.28); w.shake = Math.max(w.shake, 0.6); w.fovKick = -8;
     w.shards.burst(e.x, y, e.z, 32, 10, '#ffc95c');
     w.slashes.spawn(e.x, e.z, 0, 'parry', '#ffc95c');
@@ -217,7 +260,10 @@ function onHit(w: ArenaWorld, e: HitEvent) {
 
   // Shattered armor debris & Retiarius net snare
   if (e.armorBroken) {
-    if (v.team === 'e') w.armorsBroken++;
+    if (v.team === 'e') {
+      w.armorsBroken++;
+      addCrowdFavor(w, 15);
+    }
     w.debris.push(new SeveredPiece(w.phys, {
       kind: e.armorBroken, style: v.style, x: v.x, z: v.z, yaw: v.yaw,
       hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy ? 12 : 8, color: v.stats.color,
@@ -236,7 +282,10 @@ function onHit(w: ArenaWorld, e: HitEvent) {
   // Severed limb debris
   if (e.severed) {
     sfx.sever();
-    if (v.team === 'e') w.limbsSevered++;
+    if (v.team === 'e') {
+      w.limbsSevered++;
+      addCrowdFavor(w, 22);
+    }
     w.debris.push(new SeveredPiece(w.phys, {
       kind: e.severed, style: v.style, x: v.x, z: v.z, yaw: v.yaw,
       hitX: e.dx, hitZ: e.dz, hitSpeed: e.heavy || e.decap ? 14 : 9, color: v.stats.color,
@@ -376,6 +425,9 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
   w.shake = Math.max(0, w.shake - dt * 2.4);
   w.fovKick *= Math.exp(-8 * dt);
   if (w.cheerCd > 0) w.cheerCd = Math.max(0, w.cheerCd - dt);
+  if (w.tauntCd > 0) w.tauntCd = Math.max(0, w.tauntCd - dt);
+  if (w.tauntT > 0) w.tauntT = Math.max(0, w.tauntT - dt);
+  sfx.stepMusic({ biome: 'kernel', combat: true, onCycle: false, dt });
 
   const player = w.fighters[0];
   const liveFoes = w.fighters.filter((f) => f.team === 'e' && f.state !== 'dead');
@@ -475,8 +527,20 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
       w.hitstop = 0.26;
       w.shake = 1.15;
       w.fovKick = -10;
+      addCrowdFavor(w, 28);
       hud.set({ callout: { text: 'EXECUTED! +22% HP', color: '#ffc95c', id: ++w.calloutId } });
     }
+  }
+
+  // [T] Crowd Favor Taunt during Arena duels
+  if (!w.spectator && fighting && player.state === 'idle' && w.tauntCd <= 0 && pressed('KeyT')) {
+    w.tauntCd = 4.2;
+    w.tauntT = 0.9;
+    sfx.taunt();
+    player.stamina = Math.min(player.maxStamina, player.stamina + 18);
+    w.shards.burst(player.x, 1.9, player.z, 20, 8, '#ffd866');
+    addCrowdFavor(w, 28);
+    hud.set({ tauntCd: 4.2, callout: { text: 'CROWD ROARS! +28 FAVOR', color: '#ffd866', id: ++w.calloutId } });
   }
 
   // Lock-On toggle / cycle target via Tab
@@ -712,6 +776,14 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
     p.airY = f.airY;
     p.diveKicking = f.diveKicking;
     p.wallSplat = f.wallSplat;
+    p.hitReaction = f.hitReaction;
+    p.hitReactionT = f.hitReactionT;
+    p.finisherChoreo = f.finisherChoreo;
+    p.finisherT = f.finisherT;
+    p.coreColor = fg.coreColor;
+    p.taunting = f.team === 'p' ? w.tauntT : 0;
+    p.wireframeBoss = f.team === 'e' && w.specialKind === 'v01_boss';
+    p.cyberLimbs = f.team === 'e' && w.specialKind === 'nemesis' ? w.nemesisCyberLimbs : undefined;
     const sp = Math.hypot(f.vx, f.vz);
     h.setMoving(f.state === 'dodge' ? 1 : Math.min(1, sp / (f.stats.speed * fg.speedMul)));
   });
@@ -721,7 +793,11 @@ function FighterView({ w, index }: { w: ArenaWorld; index: number }) {
       gear={fg.visuals}
       color={f.stats.color}
       accent={f.team === 'p' ? '#ffc95c' : '#e9e6ff'}
-      scale={f.kind === 'brute' ? 1.24 : f.kind === 'champion' ? 1.15 : fg.scale}
+      scale={
+        f.team === 'e' && w.specialKind === 'garbage_collector' && f.kind === 'champion'
+          ? 1.42
+          : f.kind === 'brute' ? 1.24 : f.kind === 'champion' ? 1.15 : fg.scale
+      }
     />
   );
 }
@@ -1293,7 +1369,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
           playerLimbs: samePlayerLimbs ? hud.playerLimbs : playerLimbs,
           enemies: sameEnemies ? hud.enemies : enemies,
           phase: shown, lockedName, combo: p.comboStep, executeReady,
-          stance: p.guardHeight, armed,
+          stance: p.guardHeight, armed, tauntCd: Number(w.tauntCd.toFixed(1)),
         });
       }
     }

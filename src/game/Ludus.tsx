@@ -14,7 +14,7 @@ import Starfield from './art/Starfield';
 import SpriteText from './art/SpriteText';
 import { CorinthianColumn, DoricColumn, IonicColumn } from './art/ClassicalColumns';
 import {
-  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, canExecuteTarget, drinkFlask,
+  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, canExecuteTarget, defaultMods, drinkFlask,
   gearOf, makeFighter, parryWindowOf, resolveStrike, spawnDroppedWeapon, startAttack, stepFighter,
   stepWeaponProps, throwFighterWeapon, tryExecute, tryPickupWeapon, windupOf,
   type ArenaWeaponProp, type Fighter, type HitEvent, type Intent, type StanceHeight,
@@ -23,7 +23,8 @@ import { DashGhosts, GhostPool, ShardPool, SlashPool, SlashRibbons } from './are
 import { lookColor } from './arena/run';
 import { type ArmorKey } from './arena/styles';
 import { buildPlayerMods } from './rpg/stats';
-import { resolveLoadout } from './rpg/items';
+import { gearFromStyle, resolveLoadout } from './rpg/items';
+import { COMPANIONS, nearestStoryStage, type CompanionDef } from './rpg/stories';
 import { clampBounds, resolveCircles } from './world/colliders';
 import {
   AQUEDUCT_PIERS, AQUEDUCT_YAW, BASIN, CITY_TOWERS, COLUMNS, JAIL_CELL,
@@ -37,8 +38,8 @@ import { boostRingsNear, nearestMemoryEcho } from './world/MemoryWoods';
 import { nearestPropertyDeed } from './world/properties';
 import { InfiniteCurvedFloor, NearestColosseumBeacon, StreamingSettlements } from './world/WorldRenderer';
 import {
-  advanceNpcSchedule, antagonizeNpc, createCityPopulation, createRegionNpcs, greetNpc, pickCityPoint, triggerStreetEvent,
-  type CityNpc,
+  advanceNpcSchedule, antagonizeNpc, createCityPopulation, createRegionNpcs, greetNpc, pickCityPoint,
+  stepNpcTrafficYield, triggerStreetEvent, type CityNpc,
 } from './world/citizens';
 import { consumeMouseLook, keys, pressed } from './input';
 import { useGame } from './store';
@@ -340,6 +341,11 @@ function syncGladiatorView(h: GladiatorHandle, f: Fighter, stanceTarget: number,
   p.airY = f.airY;
   p.diveKicking = f.diveKicking;
   p.wallSplat = f.wallSplat;
+  p.hitReaction = f.hitReaction;
+  p.hitReactionT = f.hitReactionT;
+  p.finisherChoreo = f.finisherChoreo;
+  p.finisherT = f.finisherT;
+  p.coreColor = fg.coreColor;
   p.block += ((f.blocking ? 1 : 0) - p.block) * 0.35;
   p.hurt = f.state === 'stagger' ? Math.max(0, 1 - f.t / 0.25) : Math.max(0, p.hurt - 0.12);
   p.stance = THREE.MathUtils.lerp(p.stance, stanceTarget, 0.22);
@@ -355,6 +361,7 @@ function syncGladiatorView(h: GladiatorHandle, f: Fighter, stanceTarget: number,
 function NpcActor({ npc }: { npc: CityNpc }) {
   const g = useRef<GladiatorHandle>(null!);
   const npcBikeRef = useRef<THREE.Group>(null!);
+  const parkedBikeRef = useRef<THREE.Group>(null!);
   const wheelFRef = useRef<THREE.Mesh>(null!);
   const wheelRRef = useRef<THREE.Mesh>(null!);
   const labelGroup = useRef<THREE.Group>(null!);
@@ -413,6 +420,14 @@ function NpcActor({ npc }: { npc: CityNpc }) {
         if (wheelRRef.current) wheelRRef.current.rotation.x += wSpin;
       }
     }
+    if (parkedBikeRef.current) {
+      const showParked = !riding && Boolean(npc.parkedCycle) && npc.mood === 'calm';
+      parkedBikeRef.current.visible = showParked;
+      if (showParked && npc.parkedCycle) {
+        parkedBikeRef.current.position.set(npc.parkedCycle.x, 0, npc.parkedCycle.z);
+        parkedBikeRef.current.rotation.set(0, npc.parkedCycle.yaw, 0.16);
+      }
+    }
 
     if (labelGroup.current) labelGroup.current.position.set(npc.x, riding ? 0.42 : 0, npc.z);
     const desiredVis = npc.barkT > 0 || armed || npc.role === 'enforcer' || npc.role === 'gladiator' || riding;
@@ -449,6 +464,12 @@ function NpcActor({ npc }: { npc: CityNpc }) {
         <mesh position={[0, 0.4, -0.92]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.core}>
           <cylinderGeometry args={[0.2, 0.2, 0.3, 8]} />
         </mesh>
+      </group>
+      <group ref={parkedBikeRef} visible={false}>
+        <mesh position={[0, 0.44, 0]} material={bikeMats.hull}><boxGeometry args={[0.48, 0.3, 2.0]} /></mesh>
+        <mesh position={[0, 0.56, 0]} material={bikeMats.trim}><boxGeometry args={[0.14, 0.12, 1.9]} /></mesh>
+        <mesh position={[0, 0.38, 0.9]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.trim}><cylinderGeometry args={[0.38, 0.38, 0.2, 8]} /></mesh>
+        <mesh position={[0, 0.38, -0.85]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.trim}><cylinderGeometry args={[0.4, 0.4, 0.24, 8]} /></mesh>
       </group>
       <Gladiator
         key={`${npc.id}-${npc.civilian ? 'civ' : 'arm'}-${npc.role}`}
@@ -654,6 +675,129 @@ function StreetWeaponPropView({ prop }: { prop: ArenaWeaponProp }) {
   );
 }
 
+/** Recruitable Wingman Ally riding a synchronized Light-Cycle beside you and fighting alongside in street/frontier skirmishes. */
+function WingmanActor({
+  comp,
+  playerRef,
+  hostilesRef,
+  fx,
+}: {
+  comp: CompanionDef;
+  playerRef: React.MutableRefObject<Fighter | null>;
+  hostilesRef: React.MutableRefObject<CityNpc[]>;
+  fx: { shards: ShardPool; slashes: SlashPool };
+}) {
+  const g = useRef<GladiatorHandle>(null!);
+  const limbPose = useRef<LimbPose>(makeLimbPose());
+  const armorPose = useRef<Record<ArmorKey, boolean>>({ helm: true, pauldron: true, shield: true });
+  const gear = useMemo(() => gearFromStyle(comp.style), [comp.style]);
+  const fighter = useMemo(() => {
+    const f = makeFighter(999, 'skirmisher', 2.6, 36, defaultMods(), comp.style, gear);
+    f.team = 'p';
+    f.hp = 160;
+    f.maxHp = 160;
+    f.stats = { ...f.stats, name: comp.name, color: comp.color, speed: 12.5 };
+    return f;
+  }, [comp, gear]);
+  const cycleState = useRef<CycleRenderState>({ active: false, x: 2.6, z: 36, yaw: 0, lean: 0, speed: 0, turbo: false });
+  const lastTeleportDist = useRef(0);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    const p = playerRef.current;
+    const h = g.current;
+    if (!p || !h) return;
+    const gs = useGame.getState();
+
+    // Snap if player fast-traveled far away
+    const distP = Math.hypot(p.x - fighter.x, p.z - fighter.z);
+    if (distP > 48 || lastTeleportDist.current > 48) {
+      fighter.x = p.x + Math.cos(p.yaw) * 3.0;
+      fighter.z = p.z - Math.sin(p.yaw) * 3.0;
+      fighter.yaw = p.yaw;
+    }
+    lastTeleportDist.current = distP;
+
+    const riding = gs.onCycle && !gs.inJail;
+    const hostiles = hostilesRef.current.filter((n) => n.mood === 'hostile' && n.fighter.state !== 'dead' && Math.hypot(n.x - p.x, n.z - p.z) < 22);
+
+    if (riding) {
+      const formX = p.x + Math.cos(p.yaw) * 3.2 - Math.sin(p.yaw) * 2.2;
+      const formZ = p.z - Math.sin(p.yaw) * 3.2 - Math.cos(p.yaw) * 2.2;
+      const dx = formX - fighter.x;
+      const dz = formZ - fighter.z;
+      fighter.x += dx * Math.min(1, dt * 7.5);
+      fighter.z += dz * Math.min(1, dt * 7.5);
+      fighter.yaw = p.yaw;
+      fighter.vx = p.vx;
+      fighter.vz = p.vz;
+      fighter.state = 'idle';
+      fighter.atk = null;
+      cycleState.current.active = true;
+      cycleState.current.x = fighter.x;
+      cycleState.current.z = fighter.z;
+      cycleState.current.yaw = fighter.yaw;
+      cycleState.current.speed = Math.hypot(p.vx, p.vz);
+      cycleState.current.turbo = cycleState.current.speed > 48;
+      cycleState.current.lean = THREE.MathUtils.lerp(cycleState.current.lean, 0, dt * 8);
+    } else if (hostiles.length > 0 && !gs.inJail) {
+      cycleState.current.active = false;
+      const foe = hostiles[0];
+      const intent = aiIntent(fighter, foe.fighter, dt);
+      const strike = stepFighter(fighter, intent, dt, foe.fighter);
+      if (strike && fighter.atk) {
+        fx.slashes.spawn(fighter.x, fighter.z, fighter.yaw, fighter.atk, comp.color, fighter.style, gear.moves[fighter.atk].motion);
+        for (const ev of resolveStrike(fighter, hostiles.map((n) => n.fighter))) {
+          fx.shards.burst(ev.x, 1.3, ev.z, 12, 6, comp.color, ev.dx, ev.dz);
+          if (ev.type === 'kill') {
+            foe.mood = 'dead';
+            foe.respawnT = 20;
+            foe.collapseT = 1.35;
+            gs.awardStreetReward(foe.bountyReward, 16, 8);
+          }
+        }
+      }
+    } else {
+      cycleState.current.active = false;
+      fighter.state = 'idle';
+      fighter.atk = null;
+      const followX = p.x - Math.cos(p.yaw) * 2.4 - Math.sin(p.yaw) * 2.2;
+      const followZ = p.z + Math.sin(p.yaw) * 2.4 - Math.cos(p.yaw) * 2.2;
+      const dx = followX - fighter.x;
+      const dz = followZ - fighter.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.65) {
+        const spd = Math.min(20, d * 5.2);
+        fighter.vx = (dx / d) * spd;
+        fighter.vz = (dz / d) * spd;
+        fighter.x += fighter.vx * dt;
+        fighter.z += fighter.vz * dt;
+        fighter.yaw = Math.atan2(dx, dz);
+        fighter.localVz = Math.min(1, spd / 14);
+      } else {
+        fighter.vx = 0;
+        fighter.vz = 0;
+        fighter.localVz = 0;
+      }
+    }
+
+    h.pose.limbs = limbPose.current;
+    h.pose.armor = armorPose.current;
+    syncGladiatorView(h, fighter, hostiles.length > 0 ? 1 : riding ? 0.65 : 0, gear.speedMul);
+    if (riding) h.group.position.y = 0.42;
+  });
+
+  return (
+    <group>
+      <LightCycle stateRef={cycleState} color={comp.cycleColor} />
+      <Gladiator ref={g} sheathed={false} gear={gear.visuals} color={comp.color} accent="#ffc95c" scale={gear.scale} />
+      <SpriteText position={[fighter.x, 2.55, fighter.z]} fontSize={0.26} color={comp.color} outlineWidth={0.04} outlineColor="#05030a">
+        {`${comp.name} · WINGMAN`}
+      </SpriteText>
+    </group>
+  );
+}
+
 /** Interactive Curved R=200 TRON Continent simulation: Player + Light-Cycle + Living Towns + Sky Beacon + Properties. */
 function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
   const g = useRef<GladiatorHandle>(null!);
@@ -672,6 +816,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
   const style = useGame((s) => s.style);
   const weaponDrawn = useGame((s) => s.weaponDrawn);
   const inJail = useGame((s) => s.inJail);
+  const activeCompanionId = useGame((s) => s.activeCompanionId);
+  const activeCompanion = useMemo(() => COMPANIONS.find((c) => c.id === activeCompanionId) ?? null, [activeCompanionId]);
+  const playerRef = useRef<Fighter | null>(null);
+  const hostilesRef = useRef<CityNpc[]>([]);
 
   const playerGear = useMemo(() => resolveLoadout(loadout), [loadout]);
   const cacheNpcs = useMemo(() => createCityPopulation(), []);
@@ -900,23 +1048,28 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     }
     s.wasArrestOpen = Boolean(game.arrestPrompt);
 
-    // Panel / Modal Toggles ([ESC], [C], [M], [V], [X])
+    // Panel / Modal Toggles ([ESC], [C], [M], [V], [X], [B])
     if (pressed('Escape') || (game.activeEchoId && pressed('Enter'))) {
       if (game.activeEchoId) game.closeEchoModal();
+      else if (game.activeStoryId) game.openStoryModal(null);
+      else if (game.activeSpecialModal && game.activeSpecialModal !== 'restore_choice') game.openSpecialModal(null);
       else if (game.activePropertyId) game.openPropertyPanel(null);
       else if (game.atlasOpen) game.setAtlasOpen(false);
       else if (game.panel) game.openPanel(null);
     }
-    if (!game.arrestPrompt && !game.activeEchoId && pressed('KeyC')) {
+    if (!game.arrestPrompt && !game.activeEchoId && !game.activeStoryId && !game.activeSpecialModal && pressed('KeyC')) {
       if (game.panel === 'locker') game.openPanel(null);
       else if (!game.panel && !game.atlasOpen && !game.activePropertyId) game.openPanel('locker');
     }
-    if (!game.arrestPrompt && !game.activeEchoId && pressed('KeyM')) {
+    if (!game.arrestPrompt && !game.activeEchoId && !game.activeStoryId && !game.activeSpecialModal && pressed('KeyM')) {
       if (game.atlasOpen) game.setAtlasOpen(false);
       else if (!game.panel && !game.activePropertyId) game.setAtlasOpen(true);
     }
 
-    const frozen = game.panel !== null || game.arrestPrompt !== null || game.atlasOpen || game.activePropertyId !== null || game.activeEchoId !== null;
+    const frozen = game.panel !== null || game.arrestPrompt !== null || game.atlasOpen || game.activePropertyId !== null || game.activeEchoId !== null || game.activeStoryId !== null || game.activeSpecialModal !== null;
+    if (!frozen && pressed('KeyB')) {
+      game.toggleCompanion();
+    }
     if (!frozen && pressed('KeyV')) {
       game.toggleCycle();
       const nowCycle = useGame.getState().onCycle;
@@ -1172,11 +1325,44 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     // Proximity interactables check (needed before Space jump/interact arbitration)
     const isNearCache = Math.hypot(p.x, p.z) < 185;
     const nearEchoHit = curGamePre.inJail ? null : nearestMemoryEcho(p.x, p.z, curGamePre.claimedEchoes, 4.5);
+    const nearStoryHit = curGamePre.inJail ? null : nearestStoryStage(p.x, p.z, curGamePre.storyProgress, 5.2);
+    const nearSpecial: 'v01' | 'restore_spire' | null = curGamePre.inJail
+      ? null
+      : Math.hypot(p.x - 1480, p.z + 920) < 5.2
+        ? 'v01'
+        : Math.hypot(p.x - 0, p.z + 1405) < 5.4
+          ? 'restore_spire'
+          : null;
     const nearColGate = curGamePre.inJail ? null : nearestWorldColosseumGate(p.x, p.z);
     const nearProp = curGamePre.inJail ? null : nearestPropertyDeed(p.x, p.z);
     const nearCacheStation = !curGamePre.inJail && isNearCache ? nearestStation(p.x, p.z) : null;
     const nearCapTerm = !curGamePre.inJail && !isNearCache ? nearestSettlementTerminal(p.x, p.z) : null;
-    const hasInteractPrompt = Boolean(nearEchoHit || nearColGate || nearProp || nearCacheStation || nearCapTerm);
+    const hasInteractPrompt = Boolean(nearEchoHit || nearStoryHit || nearSpecial || nearColGate || nearProp || nearCacheStation || nearCapTerm);
+
+    // Handle Pending Story Duel Challenger
+    if (curGamePre.pendingStoryDuel && activeNpcs.length > 0) {
+      const sd = curGamePre.pendingStoryDuel;
+      const host = activeNpcs.find((n) => n.mood !== 'dead' && n.role !== 'enforcer') ?? activeNpcs[0];
+      host.filename = sd.name;
+      host.style = sd.style;
+      host.color = sd.color;
+      host.gear = gearFromStyle(sd.style);
+      host.mood = 'hostile';
+      host.civilian = false;
+      host.onVehicle = false;
+      host.bountyReward = sd.rewardCycles;
+      host.x = p.x + Math.sin(p.yaw) * 4.5;
+      host.z = p.z + Math.cos(p.yaw) * 4.5;
+      host.fighter.hp = 125;
+      host.fighter.maxHp = 125;
+      host.fighter.x = host.x;
+      host.fighter.z = host.z;
+      host.fighter.stats = { ...host.fighter.stats, name: sd.name, color: sd.color };
+      host.bark = `${sd.name} challenges you!`;
+      host.barkT = 5.0;
+      game.setWeaponDrawn(true);
+      game.clearPendingStoryDuel();
+    }
 
     // Input buffering + Flying Dismount Cleave + Weapon Throw / Pickup + Jump / Sidestep
     const b = s.buf;
@@ -1686,15 +1872,16 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
             f.vx = 0; f.vz = 0; f.localVz = 0;
           } else {
             if (n.hasVehicle && n.mood === 'calm' && dist > 16) n.onVehicle = true;
-            if (n.onVehicle) spd = n.role === 'enforcer' ? 12.5 : 10.5;
+            const traffic = stepNpcTrafficYield(n, p.x, p.z, activeNpcs);
+            if (n.onVehicle) spd = (n.role === 'enforcer' ? 12.5 : 10.5) * traffic.speedMul;
             const desiredYaw = Math.atan2(dx, dz);
             const dyaw = Math.atan2(Math.sin(desiredYaw - f.yaw), Math.cos(desiredYaw - f.yaw));
             if (n.onVehicle) {
               const turnStep = THREE.MathUtils.clamp(dyaw, -4.2 * dt, 4.2 * dt);
               f.yaw += turnStep;
               n.vehicleLean = THREE.MathUtils.lerp(n.vehicleLean, THREE.MathUtils.clamp(-dyaw * 0.45, -0.35, 0.35), 1 - Math.exp(-8 * dt));
-              f.vx = Math.sin(f.yaw) * spd;
-              f.vz = Math.cos(f.yaw) * spd;
+              f.vx = Math.sin(f.yaw) * spd + Math.cos(f.yaw) * traffic.laneOffset * 0.25;
+              f.vz = Math.cos(f.yaw) * spd - Math.sin(f.yaw) * traffic.laneOffset * 0.25;
             } else {
               n.vehicleLean = 0;
               f.vx = (dx / dist) * spd;
@@ -1862,9 +2049,23 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       }
     }
 
-    // Interactions: Memory Echo > Colosseum Gate > Property Deed > Station / Capital Terminal
+    // Sync Wingman refs & Adaptive Synthwave Score
+    playerRef.current = p;
+    hostilesRef.current = activeNpcs;
+    if (!frozen && !curGame.inJail) {
+      sfx.stepMusic({
+        biome: biomeAt(p.x, p.z),
+        combat: Boolean(duelNpc) || liveHostiles.some((h) => Math.hypot(h.x - p.x, h.z - p.z) < 16),
+        onCycle: curGame.onCycle,
+        dt: rawDt,
+      });
+    }
+
+    // Interactions: Memory Echo > Story Contact > Special Shrine > Colosseum Gate > Property Deed > Station / Capital Terminal
     if (!frozen) {
       game.setNearEcho(nearEchoHit?.echo.id ?? null);
+      game.setNearStory(nearStoryHit?.story.id ?? null);
+      game.setNearSpecialShrine(nearSpecial);
       game.setNearColosseum(nearColGate?.id ?? null);
       game.setNearProperty(nearProp?.id ?? null);
       const stationId = nearCacheStation ? nearCacheStation.id : nearCapTerm ? nearCapTerm.kind : null;
@@ -1875,6 +2076,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         if (nearEchoHit && game.claimMemoryEcho(nearEchoHit.echo.id)) {
           sfx.execute();
           fx.shards.burst(nearEchoHit.echo.x, 2.2, nearEchoHit.echo.z, 32, 9.5, nearEchoHit.echo.color);
+        } else if (nearStoryHit) {
+          game.openStoryModal(nearStoryHit.story.id);
+        } else if (nearSpecial) {
+          game.openSpecialModal(nearSpecial);
         } else if (nearColGate) {
           game.setLastWorldPos(p.x, p.z);
           game.openColosseumGate(nearColGate.id);
@@ -1938,6 +2143,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         {cacheNpcs.map((n) => <NpcActor key={n.id} npc={n} />)}
       </group>
       {regionNpcs.list.map((n) => <NpcActor key={`${regionNpcs.settlementId}-${n.id}`} npc={n} />)}
+      {activeCompanion && <WingmanActor comp={activeCompanion} playerRef={playerRef} hostilesRef={hostilesRef} fx={fx} />}
       <StreetReticle targetRef={reticleTarget} />
       <LightCycle stateRef={cycleState} color={lookColor(look)} />
       <Gladiator

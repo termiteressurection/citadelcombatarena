@@ -6,11 +6,13 @@ import { Brazier } from '../art/Ps1Sky';
 import { CITY_CURVE_RADIUS, curveDrop, makeCurvedBasicMaterial } from '../art/curvature';
 import { cloneTex, getPs1Texture, makePs1Material } from '../art/ps1Textures';
 import { useGame } from '../store';
+import { activeStageOf, REGIONAL_STORIES } from '../rpg/stories';
+import { BiomeWeather } from './BiomeWeather';
 import { MemoryWoodsAndFlora } from './MemoryWoods';
 import { PROPERTIES, propertyRentPayout, type PropertyDef } from './properties';
 import {
-  biomeAt, CAPITALS, nearestColosseum, SATELLITES, settlementBuildings,
-  settlementTerminals, type BiomeId, type ColosseumDef, type Settlement,
+  biomeAt, CAPITALS, HIGHWAY_SEGMENTS, isGhostVillage, nearestColosseum, SATELLITES, settlementBuildings,
+  settlementTerminals, type BiomeId, type ColosseumDef, type HighwaySegment, type Settlement,
 } from './universe';
 
 const BIOME_GRID_COLORS: Record<BiomeId, { color: string; emissive: string }> = {
@@ -93,9 +95,11 @@ export function NearestColosseumBeacon({ playerPos }: { playerPos: React.Mutable
     const px = playerPos.current.x;
     const pz = playerPos.current.z;
     const { colosseum, dist } = nearestColosseum(px, pz);
+    const isSov = useGame.getState().restoreProtocolState === 'sovereign';
+    const beaconCol = isSov ? '#ffd866' : colosseum.color;
 
-    mats.aura.color.set(colosseum.color);
-    mats.ring.color.set(colosseum.color);
+    mats.aura.color.set(beaconCol);
+    mats.ring.color.set(beaconCol);
 
     if (rootRef.current) {
       const dx = colosseum.x - px;
@@ -177,9 +181,11 @@ function getSharedMats(): SharedMats {
   return cachedShared;
 }
 
-/** Individual Fable Property building + Deed Post sign reflecting live ownership, mode, and renovation tier. */
+/** Individual walk-inside Fable Property Sanctuary + Deed Post sign reflecting ownership, mode, tier, and earned trophies. */
 function PropertyDeedView({ prop }: { prop: PropertyDef }) {
   const owned = useGame((s) => s.ownedProperties[prop.id]);
+  const belts = useGame((s) => s.championBelts);
+  const echoes = useGame((s) => s.claimedEchoes);
   const m = useMemo(getSharedMats, []);
   const gemRef = useRef<THREE.Mesh>(null!);
 
@@ -202,39 +208,78 @@ function PropertyDeedView({ prop }: { prop: PropertyDef }) {
     }
   });
 
-  const bodyH = prop.kind === 'estate' ? 4.4 : prop.kind === 'tavern' ? 3.8 : prop.kind === 'shop' ? 3.4 : 3.0;
-  const bodyW = prop.kind === 'estate' ? 5.2 : 4.2;
+  const bodyH = prop.kind === 'estate' ? 4.4 : prop.kind === 'tavern' ? 3.8 : prop.kind === 'shop' ? 3.4 : 3.2;
+  const bodyW = prop.kind === 'estate' ? 5.6 : 4.8;
+  const wallMat = tier >= 2 ? m.hull : m.hullDark;
 
   return (
     <group>
-      {/* Main Building Footprint */}
+      {/* Walk-Inside Open-Front Sanctuary Chamber */}
       <group position={[prop.x, 0, prop.z]}>
-        <mesh position={[0, 0.2, 0]} material={m.hullDark}><boxGeometry args={[bodyW + 0.8, 0.4, bodyW + 0.6]} /></mesh>
-        <mesh position={[0, bodyH / 2 + 0.4, 0]} material={tier >= 2 ? m.hull : m.hullDark}>
-          <boxGeometry args={[bodyW, bodyH, bodyW - 0.3]} />
+        {/* Interior Sanctuary Floor Pad & Glowing Threshold */}
+        <mesh position={[0, 0.08, 0.1]} material={m.hullDark}><boxGeometry args={[bodyW + 0.6, 0.16, bodyW + 0.2]} /></mesh>
+        <mesh position={[0, 0.17, 0.2]} material={owned ? trimMat : accentMat}>
+          <boxGeometry args={[bodyW - 1.2, 0.04, bodyW - 1.4]} />
         </mesh>
-        {/* Pitched roof / Penthouse deck */}
+        {/* Back Trophy Wall & Left/Right Alcove Walls (Front South Doorway Open!) */}
+        <mesh position={[0, bodyH / 2 + 0.16, -bodyW * 0.42]} material={wallMat}>
+          <boxGeometry args={[bodyW, bodyH, 0.42]} />
+        </mesh>
+        <mesh position={[-bodyW * 0.46, bodyH / 2 + 0.16, -0.15]} material={wallMat}>
+          <boxGeometry args={[0.42, bodyH, bodyW * 0.78]} />
+        </mesh>
+        <mesh position={[bodyW * 0.46, bodyH / 2 + 0.16, -0.15]} material={wallMat}>
+          <boxGeometry args={[0.42, bodyH, bodyW * 0.78]} />
+        </mesh>
+        {/* Front Doorway Pillars */}
+        <mesh position={[-bodyW * 0.44, bodyH / 2 + 0.16, bodyW * 0.34]} material={tier >= 2 ? m.gold : m.hull}>
+          <boxGeometry args={[0.42, bodyH, 0.42]} />
+        </mesh>
+        <mesh position={[bodyW * 0.44, bodyH / 2 + 0.16, bodyW * 0.34]} material={tier >= 2 ? m.gold : m.hull}>
+          <boxGeometry args={[0.42, bodyH, 0.42]} />
+        </mesh>
+        {/* Roof / Penthouse Deck */}
         {prop.kind === 'estate' ? (
-          <mesh position={[0, bodyH + 0.85, 0]} material={tier >= 3 ? m.gold : m.hull}>
-            <boxGeometry args={[bodyW - 0.5, 0.9, bodyW - 0.8]} />
+          <mesh position={[0, bodyH + 0.56, 0]} material={tier >= 3 ? m.gold : m.hull}>
+            <boxGeometry args={[bodyW + 0.2, 0.72, bodyW - 0.1]} />
           </mesh>
         ) : (
-          <mesh position={[0, bodyH + 1.15, 0]} rotation={[0, Math.PI / 4, 0]} material={tier >= 3 ? m.gold : m.hull}>
-            <coneGeometry args={[bodyW * 0.78, 1.5, 4]} />
+          <mesh position={[0, bodyH + 0.95, 0]} rotation={[0, Math.PI / 4, 0]} material={tier >= 3 ? m.gold : m.hull}>
+            <coneGeometry args={[bodyW * 0.76, 1.45, 4]} />
           </mesh>
         )}
-        {/* Shop awning */}
+        {/* Shop / Tavern Front Awning */}
         {(prop.kind === 'shop' || prop.kind === 'tavern') && (
-          <mesh position={[0, 2.35, bodyW * 0.52]} rotation={[0.25, 0, 0]} material={m.holo}>
-            <boxGeometry args={[bodyW * 0.86, 0.18, 1.1]} />
+          <mesh position={[0, 2.55, bodyW * 0.46]} rotation={[0.25, 0, 0]} material={m.holo}>
+            <boxGeometry args={[bodyW * 0.86, 0.16, 1.0]} />
           </mesh>
+        )}
+        {/* Mounted Wall Trophies Inside Owned Sanctuary Homes */}
+        {owned && (
+          <group position={[0, 0, -bodyW * 0.42 + 0.28]}>
+            {/* Wall Weapon Rack */}
+            <mesh position={[1.1, 1.5, 0]} material={trimMat}><boxGeometry args={[0.12, 1.25, 0.08]} /></mesh>
+            <mesh position={[1.1, 1.05, 0]} material={m.gold}><boxGeometry args={[0.34, 0.08, 0.1]} /></mesh>
+            {/* Sector Champion Belts */}
+            {belts.slice(0, 5).map((bId, i) => (
+              <mesh key={bId} position={[-1.15 + i * 0.56, 2.35, 0]} material={m.gold}>
+                <torusGeometry args={[0.16, 0.048, 5, 10]} />
+              </mesh>
+            ))}
+            {/* Decrypted Memory Echo Relics */}
+            {echoes.slice(0, 4).map((eId, i) => (
+              <mesh key={eId} position={[-1.05 + i * 0.56, 1.55, 0.04]} material={accentMat}>
+                <octahedronGeometry args={[0.12, 0]} />
+              </mesh>
+            ))}
+          </group>
         )}
         {/* Neon Ownership / Tier Trim */}
-        <mesh position={[0, bodyH + 0.42, 0]} material={tier >= 2 ? trimMat : accentMat}>
+        <mesh position={[0, bodyH + 0.18, 0]} material={tier >= 2 ? trimMat : accentMat}>
           <boxGeometry args={[bodyW + 0.18, 0.16, bodyW - 0.12]} />
         </mesh>
         {tier >= 3 && (
-          <mesh position={[0, bodyH + 2.35, 0]} material={m.gold}>
+          <mesh position={[0, bodyH + 2.1, 0]} material={m.gold}>
             <octahedronGeometry args={[0.42, 0]} />
           </mesh>
         )}
@@ -386,11 +431,87 @@ function CapitalView({ s }: { s: Settlement }) {
   );
 }
 
+function DataHighwayView({ seg }: { seg: HighwaySegment }) {
+  const m = useMemo(getSharedMats, []);
+  const edgeMat = useMemo(() => makeCurvedBasicMaterial({ color: seg.color }), [seg.color]);
+  const centerMat = useMemo(() => makeCurvedBasicMaterial({ color: seg.secondary }), [seg.secondary]);
+  const yaw = Math.atan2(seg.ux, seg.uz);
+  const segCount = Math.max(2, Math.ceil(seg.length / 18));
+  const chunkLen = seg.length / segCount;
+
+  return (
+    <group>
+      {Array.from({ length: segCount }, (_, i) => {
+        const mid = (i + 0.5) * chunkLen;
+        const cx = seg.x1 + seg.ux * mid;
+        const cz = seg.z1 + seg.uz * mid;
+        const showPost = i % 3 === 0;
+        return (
+          <group key={i} position={[cx, 0, cz]} rotation={[0, yaw, 0]}>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.022, 0]} material={m.hullDark}>
+              <planeGeometry args={[6.2, chunkLen + 0.25, 1, 3]} />
+            </mesh>
+            <mesh position={[-3.05, 0.045, 0]} material={edgeMat}>
+              <boxGeometry args={[0.16, 0.05, chunkLen + 0.2, 1, 1, 2]} />
+            </mesh>
+            <mesh position={[3.05, 0.045, 0]} material={edgeMat}>
+              <boxGeometry args={[0.16, 0.05, chunkLen + 0.2, 1, 1, 2]} />
+            </mesh>
+            <mesh position={[0, 0.04, 0]} material={centerMat}>
+              <boxGeometry args={[0.14, 0.03, chunkLen * 0.48]} />
+            </mesh>
+            {showPost && (
+              <>
+                <mesh position={[-3.35, 1.35, 0]} material={m.hull}><cylinderGeometry args={[0.08, 0.11, 2.7, 5]} /></mesh>
+                <mesh position={[-3.35, 2.75, 0]} material={edgeMat}><octahedronGeometry args={[0.22, 0]} /></mesh>
+                <mesh position={[3.35, 1.35, 0]} material={m.hull}><cylinderGeometry args={[0.08, 0.11, 2.7, 5]} /></mesh>
+                <mesh position={[3.35, 2.75, 0]} material={centerMat}><octahedronGeometry args={[0.22, 0]} /></mesh>
+              </>
+            )}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function DataHighwayNetwork({ playerPos }: { playerPos: React.MutableRefObject<THREE.Vector3> }) {
+  const [visibleSegs, setVisibleSegs] = useState<string[]>([]);
+  const timer = useRef(0);
+
+  useFrame((_, delta) => {
+    timer.current += delta;
+    if (timer.current < 0.32) return;
+    timer.current = 0;
+    const px = playerPos.current.x;
+    const pz = playerPos.current.z;
+    const near: string[] = [];
+    for (const seg of HIGHWAY_SEGMENTS) {
+      const t = Math.max(0, Math.min(seg.length, (px - seg.x1) * seg.ux + (pz - seg.z1) * seg.uz));
+      const d = Math.hypot(px - (seg.x1 + seg.ux * t), pz - (seg.z1 + seg.uz * t));
+      if (d < 340) near.push(seg.id);
+    }
+    const key = near.join('|');
+    if (key !== visibleSegs.join('|')) setVisibleSegs(near);
+  });
+
+  const activeSet = useMemo(() => new Set(visibleSegs), [visibleSegs]);
+  return (
+    <group>
+      {HIGHWAY_SEGMENTS.filter((s) => activeSet.has(s.id)).map((seg) => (
+        <DataHighwayView key={seg.id} seg={seg} />
+      ))}
+    </group>
+  );
+}
+
 function SatelliteView({ s }: { s: Settlement }) {
   const m = useMemo(getSharedMats, []);
+  const restored = useGame((g) => g.restoreProtocolState === 'restored') && isGhostVillage(s.id);
   const buildings = useMemo(() => settlementBuildings(s), [s]);
-  const accentMat = useMemo(() => makeCurvedBasicMaterial({ color: s.accent }), [s.accent]);
-  const bodyMat = s.biome === 'vault' ? m.crystal : s.biome === 'bazaar' ? m.wood : s.biome === 'frontier' ? m.rust : m.hull;
+  const col = restored ? '#4dffa0' : s.accent;
+  const accentMat = useMemo(() => makeCurvedBasicMaterial({ color: col }), [col]);
+  const bodyMat = restored ? m.gold : s.biome === 'vault' ? m.crystal : s.biome === 'bazaar' ? m.wood : s.biome === 'frontier' ? m.rust : m.hull;
 
   return (
     <group>
@@ -400,16 +521,89 @@ function SatelliteView({ s }: { s: Settlement }) {
       <mesh position={[s.x, 0.05, s.z]} rotation={[-Math.PI / 2, 0, 0]} material={accentMat}>
         <ringGeometry args={[17.4, 18, 12]} />
       </mesh>
-      <Brazier position={[s.x, 0, s.z]} scale={1.05} color={s.accent} />
+      <Brazier position={[s.x, 0, s.z]} scale={1.05} color={col} />
+      {restored && (
+        <group position={[s.x, 0, s.z]}>
+          <mesh position={[0, 4.4, 0]} material={m.gold}><cylinderGeometry args={[0.35, 0.72, 8.8, 6]} /></mesh>
+          <mesh position={[0, 9.4, 0]} material={accentMat}><octahedronGeometry args={[1.05, 0]} /></mesh>
+          <mesh position={[0, 6.2, 0]} rotation={[Math.PI / 2, 0, 0]} material={accentMat}><torusGeometry args={[2.2, 0.14, 6, 14]} /></mesh>
+        </group>
+      )}
       {buildings.map((b, i) => (
         <group key={i} position={[b.x, 0, b.z]}>
           <mesh position={[0, b.h / 2, 0]} material={bodyMat}><boxGeometry args={[b.w, b.h, b.d]} /></mesh>
           <mesh position={[0, b.h + 0.2, 0]} material={accentMat}><boxGeometry args={[b.w * 0.8, 0.25, b.d * 0.8]} /></mesh>
         </group>
       ))}
-      <SpriteText position={[s.x, 5.8, s.z]} fontSize={0.62} color={s.accent} outlineWidth={0.04} outlineColor="#05030a">
-        {`${s.name} (${s.code})`}
+      <SpriteText position={[s.x, restored ? 11.4 : 5.8, s.z]} fontSize={0.62} color={col} outlineWidth={0.04} outlineColor="#05030a">
+        {restored ? `${s.name} [RESTORED SANCTUARY]` : `${s.name} (${s.code})`}
       </SpriteText>
+    </group>
+  );
+}
+
+function StoryBeaconsAndShrines({ playerPos }: { playerPos: React.MutableRefObject<THREE.Vector3> }) {
+  const storyProgress = useGame((g) => g.storyProgress);
+  const v01Done = useGame((g) => g.v01BossDefeated);
+  const restoreState = useGame((g) => g.restoreProtocolState);
+  const px = playerPos.current.x;
+  const pz = playerPos.current.z;
+  const v01Mat = useMemo(() => makeCurvedBasicMaterial({ color: '#4dffa0', wireframe: true }), []);
+  const spireMat = useMemo(() => makeCurvedBasicMaterial({ color: '#ffd866' }), []);
+  const wireRef = useRef<THREE.Mesh>(null!);
+
+  useFrame(({ clock }) => {
+    if (wireRef.current) {
+      wireRef.current.rotation.y = clock.elapsedTime * 1.4;
+      wireRef.current.position.y = 2.9 + Math.sin(clock.elapsedTime * 2.2) * 0.22;
+    }
+  });
+
+  return (
+    <group>
+      {REGIONAL_STORIES.map((story) => {
+        const st = activeStageOf(story, storyProgress);
+        if (!st || Math.hypot(st.x - px, st.z - pz) > 190) return null;
+        return (
+          <group key={story.id} position={[st.x, 0, st.z]}>
+            <mesh position={[0, 1.35, 0]}>
+              <cylinderGeometry args={[0.22, 0.34, 2.7, 6]} />
+              <meshBasicMaterial color={story.color} />
+            </mesh>
+            <mesh position={[0, 3.1, 0]}>
+              <octahedronGeometry args={[0.45, 0]} />
+              <meshBasicMaterial color="#ffc95c" />
+            </mesh>
+            <SpriteText position={[0, 4.1, 0]} fontSize={0.34} color={story.color} outlineWidth={0.04} outlineColor="#05030a">
+              {`[!] ${st.speaker}\n${story.title}`}
+            </SpriteText>
+          </group>
+        );
+      })}
+
+      {/* Secret Version 0.1 Wireframe Boss Shrine at Wreck of V0.1 */}
+      {Math.hypot(1480 - px, -920 - pz) < 220 && (
+        <group position={[1480, 0, -920]}>
+          <mesh position={[0, 0.22, 0]} material={v01Mat}><cylinderGeometry args={[2.6, 2.9, 0.44, 6]} /></mesh>
+          <mesh ref={wireRef} position={[0, 2.9, 0]} material={v01Mat}><octahedronGeometry args={[1.15, 0]} /></mesh>
+          <SpriteText position={[0, 4.9, 0]} fontSize={0.44} color="#4dffa0" outlineWidth={0.04} outlineColor="#05030a">
+            {v01Done ? 'PROTO_0.1.WIRE [DEFEATED]' : 'V0.1 WIREFRAME ANOMALY\n[ENTER] CHALLENGE'}
+          </SpriteText>
+        </group>
+      )}
+
+      {/* Kernel Spire Finale: The Restore Protocol Terminal */}
+      {Math.hypot(0 - px, -1405 - pz) < 220 && (
+        <group position={[0, 0, -1405]}>
+          <mesh position={[0, 0.25, 0]} material={spireMat}><cylinderGeometry args={[3.1, 3.5, 0.5, 8]} /></mesh>
+          <mesh position={[0, 2.2, 0]} material={spireMat}><octahedronGeometry args={[0.95, 0]} /></mesh>
+          <SpriteText position={[0, 4.4, 0]} fontSize={0.48} color="#ffd866" outlineWidth={0.04} outlineColor="#05030a">
+            {restoreState === 'none'
+              ? 'ROOT RESTORE TERMINAL\n[ENTER] THE RESTORE PROTOCOL'
+              : `KERNEL PROTOCOL: ${restoreState.toUpperCase()}`}
+          </SpriteText>
+        </group>
+      )}
     </group>
   );
 }
@@ -522,6 +716,9 @@ export function StreamingSettlements({ playerPos }: { playerPos: React.MutableRe
 
   return (
     <group>
+      <DataHighwayNetwork playerPos={playerPos} />
+      <BiomeWeather playerPos={playerPos} />
+      <StoryBeaconsAndShrines playerPos={playerPos} />
       {CAPITALS.filter((c) => vis.capitals.includes(c.id)).map((c) => <CapitalView key={c.id} s={c} />)}
       {SATELLITES.filter((s) => vis.satellites.includes(s.id)).map((s) => <SatelliteView key={s.id} s={s} />)}
       {CAPITALS.filter((c) => vis.distant.includes(c.id)).map((c) => (

@@ -149,4 +149,62 @@ export const sfx = {
     tone('sawtooth', 140, 520, 0.28, 0.3);
     noise('bandpass', 900, 3200, 1.2, 0.25, 0.34);
   },
+
+  taunt(): void {
+    tone('triangle', 220, 440, 0.2, 0.32);
+    tone('triangle', 330, 660, 0.24, 0.28, 0.05);
+    noise('bandpass', 800, 2200, 1.4, 0.28, 0.25, 0.04);
+  },
+
+  restoreWave(): void {
+    tone('sine', 261.63, 523.25, 0.45, 0.35);
+    tone('triangle', 329.63, 659.25, 0.48, 0.3, 0.08);
+    tone('triangle', 392.0, 783.99, 0.52, 0.28, 0.16);
+  },
+
+  isMusicEnabled(): boolean {
+    return musicEnabled;
+  },
+
+  setMusicEnabled(on: boolean): void {
+    musicEnabled = on;
+  },
+
+  toggleMusic(): boolean {
+    musicEnabled = !musicEnabled;
+    return musicEnabled;
+  },
+
+  /** Procedural adaptive PS1 synthwave step sequencer shifting cleanly across biomes, combat & turbo rides. */
+  stepMusic(opts: { biome: string; combat: boolean; onCycle: boolean; dt?: number }): void {
+    if (!musicEnabled || typeof window === 'undefined') return;
+    const stepDur = opts.combat ? 0.175 : opts.onCycle ? 0.165 : 0.26;
+    musicAcc += opts.dt ?? 0.016;
+    if (musicAcc < stepDur) return;
+    musicAcc = 0;
+
+    const scale = BIOME_SCALES[opts.biome] ?? BIOME_SCALES.metropolis;
+    const step = musicStep++;
+    const bassFreq = scale[step % 4] * (opts.combat ? 0.5 : 0.5);
+    tone(opts.onCycle ? 'sawtooth' : 'triangle', bassFreq, bassFreq * 0.99, stepDur * 0.85, opts.combat ? 0.11 : 0.07);
+
+    if (step % 2 === 0 || opts.onCycle) {
+      const leadFreq = scale[(step * 3 + (opts.combat ? 2 : 0)) % scale.length] * (opts.combat ? 2 : 1.5);
+      tone('sine', leadFreq, leadFreq, stepDur * 0.72, opts.combat ? 0.065 : 0.045, 0.01);
+    }
+    if (opts.combat && step % 4 === 0) {
+      tone('sine', 110, 38, 0.12, 0.24);
+    }
+  },
+};
+
+let musicEnabled = true;
+let musicAcc = 0;
+let musicStep = 0;
+const BIOME_SCALES: Record<string, number[]> = {
+  metropolis: [110, 130.81, 146.83, 164.81, 196.0, 220],
+  bazaar: [116.54, 138.59, 155.56, 174.61, 207.65, 233.08],
+  vault: [98.0, 116.54, 130.81, 146.83, 174.61, 196.0],
+  frontier: [87.31, 103.83, 116.54, 130.81, 155.56, 174.61],
+  kernel: [130.81, 164.81, 196.0, 246.94, 261.63, 329.63],
 };

@@ -5,6 +5,71 @@ export type OffhandVisual = 'none' | 'buckler' | 'scutum' | 'net';
 export type HelmVisual = 'none' | 'leather' | 'galea' | 'horned' | 'cage' | 'corinthian';
 export type BodyVisual = 'tunic' | 'galerus' | 'manica' | 'spiked' | 'cuirass';
 export type CapeVisual = 'none' | 'scarf' | 'cloak' | 'mantle';
+export type EchoCoreId = 'none' | 'volt_arc' | 'frame_freeze' | 'cycle_siphon' | 'corrupt_bleed';
+
+export interface EchoCoreDef {
+  id: EchoCoreId;
+  name: string;
+  desc: string;
+  color: string;
+  reqEchoes: number;
+  cost: number;
+  dmgBonus: number;
+  limbBonus: number;
+}
+
+export const ECHO_CORES: EchoCoreDef[] = [
+  {
+    id: 'none',
+    name: 'UNSOCKETED PORT',
+    desc: 'Standard hard-light compilation with zero glitch modifier.',
+    color: '#a99dc4',
+    reqEchoes: 0,
+    cost: 0,
+    dmgBonus: 0,
+    limbBonus: 0,
+  },
+  {
+    id: 'volt_arc',
+    name: 'VOLT-ARC CORE',
+    desc: 'High-voltage static (+14% damage & extra stagger shock).',
+    color: '#3ff0ff',
+    reqEchoes: 1,
+    cost: 90,
+    dmgBonus: 0.14,
+    limbBonus: 0.08,
+  },
+  {
+    id: 'frame_freeze',
+    name: 'FRAME-FREEZE CORE',
+    desc: 'Heavy/Riposte strikes clock-slow foes for 1.6s.',
+    color: '#a78bfa',
+    reqEchoes: 3,
+    cost: 140,
+    dmgBonus: 0.06,
+    limbBonus: 0.1,
+  },
+  {
+    id: 'cycle_siphon',
+    name: 'CYCLE-SIPHON CORE',
+    desc: 'Heavy/Riposte impacts leach +6 HP & +10 Stamina.',
+    color: '#4dffa0',
+    reqEchoes: 6,
+    cost: 185,
+    dmgBonus: 0.08,
+    limbBonus: 0.08,
+  },
+  {
+    id: 'corrupt_bleed',
+    name: 'CORRUPT-BLEED CORE',
+    desc: 'Weaponized segfault (+28% limb severing trauma).',
+    color: '#ff3b5c',
+    reqEchoes: 10,
+    cost: 240,
+    dmgBonus: 0.12,
+    limbBonus: 0.28,
+  },
+];
 
 export interface GearVisuals {
   weapon: WeaponFamily;
@@ -20,6 +85,7 @@ export interface Loadout {
   helmId: string;
   bodyId: string;
   capeId: string;
+  coreId?: EchoCoreId;
 }
 
 export const DEFAULT_LOADOUT: Loadout = {
@@ -28,6 +94,7 @@ export const DEFAULT_LOADOUT: Loadout = {
   helmId: 'leather_cap',
   bodyId: 'recruit_tunic',
   capeId: 'none',
+  coreId: 'none',
 };
 
 export type GearSlot = 'weapon' | 'offhand' | 'helm' | 'body' | 'cape';
@@ -130,6 +197,8 @@ export interface ResolvedGear {
   fameMul: number;
   moves: Record<MoveSlot, MoveSpec>;
   visuals: GearVisuals;
+  coreId: EchoCoreId;
+  coreColor: string | null;
 }
 
 export const WEAPONS: WeaponDef[] = [
@@ -210,6 +279,12 @@ export const WEAPONS: WeaponDef[] = [
     family: 'warhammer', cost: 420, reqFame: 300, color: '#ff4fd8',
     twoHanded: true, blunt: true, heavyBreaksBlock: true,
     dmgMul: 1.65, windupMul: 1.22, recoverMul: 1.12, reachMul: 1.30, lungeMul: 1.12, knockMul: 1.75, speedMul: 0.94, limbMul: 1.35,
+  },
+  {
+    id: 'proto_wire_blade', name: 'V0.1 WIRE-BLADE', desc: 'Relic prototype edge from the dawn of Boneyard.',
+    family: 'gladius', cost: 650, reqFame: 550, color: '#4dffa0',
+    twoHanded: false, blunt: false, heavyBreaksBlock: false,
+    dmgMul: 1.46, windupMul: 0.86, recoverMul: 0.86, reachMul: 1.18, lungeMul: 1.22, knockMul: 1.22, speedMul: 1.08, limbMul: 1.30,
   },
 ];
 
@@ -296,6 +371,7 @@ export function resolveLoadout(loadout: Loadout): ResolvedGear {
   const helm = itemById(HELMS, loadout.helmId);
   const body = itemById(BODIES, loadout.bodyId);
   const cape = itemById(CAPES, loadout.capeId);
+  const core = itemById(ECHO_CORES, loadout.coreId ?? 'none');
 
   const baseStyle = STYLES[FAMILY_TO_STYLE[w.family]];
   const moves: Record<MoveSlot, MoveSpec> = {
@@ -309,15 +385,15 @@ export function resolveLoadout(loadout: Loadout): ResolvedGear {
 
   return {
     name: w.name,
-    color: w.color,
-    dmgMul: w.dmgMul,
+    color: core.id !== 'none' ? core.color : w.color,
+    dmgMul: w.dmgMul * (1 + core.dmgBonus),
     windupMul: w.windupMul,
     recoverMul: w.recoverMul,
     reachMul: w.reachMul,
     lungeMul: w.lungeMul,
     knockMul: w.knockMul,
     speedMul,
-    limbMul: w.limbMul,
+    limbMul: w.limbMul * (1 + core.limbBonus),
     blockStamMul: off.blockStamMul,
     parryBonus: off.parryBonus,
     blunt: w.blunt,
@@ -341,6 +417,8 @@ export function resolveLoadout(loadout: Loadout): ResolvedGear {
       body: body.visual,
       cape: cape.visual,
     },
+    coreId: core.id,
+    coreColor: core.id !== 'none' ? core.color : null,
   };
 }
 
@@ -379,5 +457,7 @@ export function gearFromStyle(id?: StyleId): ResolvedGear {
     fameMul: 1,
     moves: { ...st.moves },
     visuals: { ...STYLE_VISUALS[st.id] },
+    coreId: 'none',
+    coreColor: null,
   };
 }

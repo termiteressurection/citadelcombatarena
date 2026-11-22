@@ -7,17 +7,23 @@ import {
   reputationDeltaForRent, type OwnedPropertyState, type PropertyMode, type RentRate,
 } from './world/properties';
 import { LOOKS } from './arena/run';
-import { type Kind, type StanceHeight } from './arena/combat';
+import { type Kind, type LimbKey, type StanceHeight } from './arena/combat';
 import { STYLE_IDS, type StyleId } from './arena/styles';
 import {
-  BODIES, CAPES, DEFAULT_LOADOUT, HELMS, OFFHANDS, WEAPONS, resolveLoadout,
-  type GearSlot, type Loadout,
+  BODIES, CAPES, DEFAULT_LOADOUT, ECHO_CORES, HELMS, OFFHANDS, WEAPONS, resolveLoadout,
+  type EchoCoreId, type GearSlot, type Loadout,
 } from './rpg/items';
 import {
   CONSUMABLES, DEFAULT_STATS, MAX_FLASKS, applyXp,
   type ConsumableId, type DailyBuffId, type RpgStats, type StatKey,
 } from './rpg/stats';
-import { updateQuestProgress, type BoutSummary, type FightCard, type Quest } from './rpg/quests';
+import { generateFightCards, updateQuestProgress, type BoutSummary, type FightCard, type Quest } from './rpg/quests';
+import {
+  createInitialStoryProgress, REGIONAL_STORIES, type StoryChoiceVerb, type StoryProgressState,
+} from './rpg/stories';
+import {
+  createDefaultNemesisRoster, nemesisFightCardFor, recordNemesisEncounter, type NemesisRival,
+} from './rpg/nemesis';
 
 export type Scene = 'ludus' | 'arena';
 export type TimeOfDay = 'morning' | 'dusk';
@@ -169,6 +175,13 @@ interface Save {
   activeColosseumId: CapitalId;
   claimedEchoes: string[];
   championBelts: CapitalId[];
+  storyProgress: Record<string, StoryProgressState>;
+  unlockedCompanions: string[];
+  activeCompanionId: string | null;
+  ownedCores: EchoCoreId[];
+  nemesisRoster: Record<CapitalId, NemesisRival>;
+  v01BossDefeated: boolean;
+  restoreProtocolState: 'none' | 'restored' | 'sovereign';
 }
 
 const KEY_V3 = 'boneyard.save.v3';
@@ -179,6 +192,7 @@ const DEFAULT_CAPITALS = CAPITALS.map((c) => c.id);
 const VALID_SETTLEMENTS = new Set(SETTLEMENTS.map((s) => s.id));
 const VALID_CAPITALS = new Set<string>(CAPITALS.map((c) => c.id));
 const VALID_ECHOES = new Set(MEMORY_ECHOES.map((e) => e.id));
+const VALID_CORES = new Set<string>(ECHO_CORES.map((c) => c.id));
 
 const blank = (): Save => ({
   day: 1,
@@ -217,6 +231,13 @@ const blank = (): Save => ({
   activeColosseumId: 'cache_city',
   claimedEchoes: [],
   championBelts: [],
+  storyProgress: createInitialStoryProgress(),
+  unlockedCompanions: ['ares_wing'],
+  activeCompanionId: 'ares_wing',
+  ownedCores: ['none', 'volt_arc'],
+  nemesisRoster: createDefaultNemesisRoster(),
+  v01BossDefeated: false,
+  restoreProtocolState: 'none',
 });
 
 function mergeOwned(base: string[], raw: unknown, validIds: Set<string>): string[] {
@@ -258,6 +279,7 @@ export function loadSave(): Save {
       helmId: typeof rawL.helmId === 'string' && hIds.has(rawL.helmId) ? rawL.helmId : b.loadout.helmId,
       bodyId: typeof rawL.bodyId === 'string' && bIds.has(rawL.bodyId) ? rawL.bodyId : b.loadout.bodyId,
       capeId: typeof rawL.capeId === 'string' && cIds.has(rawL.capeId) ? rawL.capeId : b.loadout.capeId,
+      coreId: typeof rawL.coreId === 'string' && VALID_CORES.has(rawL.coreId) ? (rawL.coreId as EchoCoreId) : 'none',
     };
 
     const rs = p.stats ?? {};
@@ -332,6 +354,13 @@ export function loadSave(): Save {
         : 'cache_city',
       claimedEchoes: mergeOwned([], p.claimedEchoes, VALID_ECHOES),
       championBelts: mergeOwned([], p.championBelts, VALID_CAPITALS) as CapitalId[],
+      storyProgress: { ...createInitialStoryProgress(), ...(p.storyProgress && typeof p.storyProgress === 'object' ? p.storyProgress : {}) },
+      unlockedCompanions: Array.isArray(p.unlockedCompanions) && p.unlockedCompanions.length ? p.unlockedCompanions : ['ares_wing'],
+      activeCompanionId: typeof p.activeCompanionId === 'string' || p.activeCompanionId === null ? p.activeCompanionId : 'ares_wing',
+      ownedCores: mergeOwned(['none', 'volt_arc'], p.ownedCores, VALID_CORES) as EchoCoreId[],
+      nemesisRoster: { ...createDefaultNemesisRoster(), ...(p.nemesisRoster && typeof p.nemesisRoster === 'object' ? p.nemesisRoster : {}) },
+      v01BossDefeated: Boolean(p.v01BossDefeated),
+      restoreProtocolState: p.restoreProtocolState === 'restored' || p.restoreProtocolState === 'sovereign' ? p.restoreProtocolState : 'none',
     };
   } catch {
     return b;
@@ -397,6 +426,27 @@ interface GameState extends Save {
   streetArmed: boolean;
   streetCallout: { text: string; color: string; id: number } | null;
   streetVitals: { hp: number; maxHp: number; st: number; maxSt: number };
+  nearStoryId: string | null;
+  activeStoryId: string | null;
+  pendingStoryDuel: { name: string; style: StyleId; color: string; rewardCycles: number } | null;
+  nearSpecialShrine: 'v01' | 'restore_spire' | null;
+  activeSpecialModal: 'v01' | 'restore_spire' | 'restore_choice' | null;
+  specialBoutKind: 'v01_boss' | 'garbage_collector' | 'nemesis' | 'grand_prix' | null;
+  grandPrixWager: number;
+  setNearStory: (id: string | null) => void;
+  openStoryModal: (id: string | null) => void;
+  chooseStoryOption: (storyId: string, verb: StoryChoiceVerb) => { outcomeText: string; completed: boolean } | null;
+  clearPendingStoryDuel: () => void;
+  setActiveCompanion: (id: string | null) => void;
+  toggleCompanion: () => void;
+  buyOrEquipCore: (coreId: EchoCoreId) => boolean;
+  startNemesisBout: (colosseumId: CapitalId) => void;
+  startGrandPrixParlay: (colosseumId: CapitalId, wager: number) => boolean;
+  setNearSpecialShrine: (k: 'v01' | 'restore_spire' | null) => void;
+  openSpecialModal: (k: 'v01' | 'restore_spire' | 'restore_choice' | null) => void;
+  startV01BossBout: () => void;
+  startRestoreProtocolBout: () => void;
+  completeRestoreProtocol: (choice: 'restored' | 'sovereign') => void;
   setNear: (id: StationId | null) => void;
   openPanel: (id: StationId | null) => void;
   setScene: (s: Scene) => void;
@@ -528,6 +578,13 @@ export const useGame = create<GameState>((set, get) => {
       activeColosseumId: s.activeColosseumId,
       claimedEchoes: s.claimedEchoes,
       championBelts: s.championBelts,
+      storyProgress: s.storyProgress,
+      unlockedCompanions: s.unlockedCompanions,
+      activeCompanionId: s.activeCompanionId,
+      ownedCores: s.ownedCores,
+      nemesisRoster: s.nemesisRoster,
+      v01BossDefeated: s.v01BossDefeated,
+      restoreProtocolState: s.restoreProtocolState,
     };
     try { localStorage.setItem(KEY_V3, JSON.stringify(payload)); } catch { /* storage unavailable */ }
   };
@@ -575,8 +632,221 @@ export const useGame = create<GameState>((set, get) => {
     streetArmed: true,
     streetCallout: null,
     streetVitals: { hp: 100, maxHp: 100, st: 100, maxSt: 100 },
+    nearStoryId: null,
+    activeStoryId: null,
+    pendingStoryDuel: null,
+    nearSpecialShrine: null,
+    activeSpecialModal: null,
+    specialBoutKind: null,
+    grandPrixWager: 0,
+    setNearStory: (nearStoryId) => { if (get().nearStoryId !== nearStoryId) set({ nearStoryId }); },
+    openStoryModal: (activeStoryId) => set({ activeStoryId, panel: null, activePropertyId: null, atlasOpen: false }),
+    clearPendingStoryDuel: () => set({ pendingStoryDuel: null }),
+    chooseStoryOption: (storyId, verb) => {
+      const s = get();
+      const story = REGIONAL_STORIES.find((x) => x.id === storyId);
+      const st = s.storyProgress[storyId];
+      if (!story || !st || st.completed) return null;
+      const stage = story.stages[st.stageIndex];
+      const choice = stage?.choices.find((c) => c.verb === verb);
+      if (!stage || !choice) return null;
+
+      const nextStageIdx = st.stageIndex + 1;
+      const completed = nextStageIdx >= story.stages.length;
+      const lv = applyXp(s.level, s.xp, s.statPoints, choice.xpDelta);
+      const nextCompanions = choice.unlockCompanionId && !s.unlockedCompanions.includes(choice.unlockCompanionId)
+        ? [...s.unlockedCompanions, choice.unlockCompanionId]
+        : s.unlockedCompanions;
+      const nextWeapons = choice.unlockWeaponId && !s.ownedWeapons.includes(choice.unlockWeaponId)
+        ? [...s.ownedWeapons, choice.unlockWeaponId]
+        : s.ownedWeapons;
+
+      set({
+        denarii: Math.max(0, s.denarii + choice.cyclesDelta),
+        reputation: Math.max(-100, Math.min(100, s.reputation + choice.repDelta)),
+        fame: Math.max(0, s.fame + choice.signalDelta),
+        glory: Math.max(0, s.glory + choice.signalDelta),
+        bounty: s.bounty + (choice.bountyDelta ?? 0),
+        level: lv.level,
+        xp: lv.xp,
+        statPoints: lv.statPoints,
+        unlockedCompanions: nextCompanions,
+        activeCompanionId: choice.unlockCompanionId ?? s.activeCompanionId,
+        ownedWeapons: nextWeapons,
+        pendingStoryDuel: choice.spawnsDuel ?? null,
+        activeStoryId: null,
+        storyProgress: {
+          ...s.storyProgress,
+          [storyId]: {
+            storyId,
+            stageIndex: completed ? st.stageIndex : nextStageIdx,
+            completed,
+            lastVerb: verb,
+            fallout: choice.outcomeText,
+          },
+        },
+        streetToast: {
+          speaker: `${story.title} · ${verb}`,
+          text: choice.outcomeText,
+          color: story.color,
+          id: ++toastId,
+        },
+      });
+      save();
+      return { outcomeText: choice.outcomeText, completed };
+    },
+    setActiveCompanion: (activeCompanionId) => { set({ activeCompanionId }); save(); },
+    toggleCompanion: () => {
+      const s = get();
+      const next = s.activeCompanionId ? null : (s.unlockedCompanions[0] ?? 'ares_wing');
+      set({ activeCompanionId: next });
+      save();
+    },
+    buyOrEquipCore: (coreId) => {
+      const s = get();
+      const core = ECHO_CORES.find((c) => c.id === coreId);
+      if (!core) return false;
+      if (s.ownedCores.includes(coreId)) {
+        set({ loadout: { ...s.loadout, coreId } });
+        save();
+        return true;
+      }
+      const price = discountedCost(core.cost, s.ownedProperties);
+      if (s.claimedEchoes.length < core.reqEchoes || s.denarii < price) return false;
+      set({
+        denarii: s.denarii - price,
+        ownedCores: [...s.ownedCores, coreId],
+        loadout: { ...s.loadout, coreId },
+      });
+      save();
+      return true;
+    },
+    startNemesisBout: (colosseumId) => {
+      const s = get();
+      const rival = s.nemesisRoster[colosseumId];
+      if (!rival) return;
+      const card = nemesisFightCardFor(rival);
+      set({
+        activeColosseumId: colosseumId,
+        selectedCard: card,
+        specialBoutKind: 'nemesis',
+        spectatorBout: null,
+        lastResult: null,
+        scene: 'arena',
+        panel: null,
+        near: null,
+        activePropertyId: null,
+        atlasOpen: false,
+        onCycle: false,
+      });
+      save();
+    },
+    startGrandPrixParlay: (colosseumId, wager) => {
+      const s = get();
+      const bet = Math.floor(wager);
+      if (!Number.isFinite(bet) || bet <= 0 || bet > s.denarii) return false;
+      const cards = generateFightCards(s.day, s.fame + 999, colosseumId);
+      const grandCard: FightCard = {
+        ...cards[2],
+        id: `gp_${colosseumId}_${s.day}`,
+        title: 'GRAND PRIX 3-WAY PARLAY FINAL',
+        subtitle: `Stake ${bet}C → 3.8× Championship Parlay`,
+        denarii: Math.round(bet * 3.8),
+        xp: 220,
+        fame: 150,
+      };
+      set({
+        denarii: s.denarii - bet,
+        activeColosseumId: colosseumId,
+        selectedCard: grandCard,
+        specialBoutKind: 'grand_prix',
+        grandPrixWager: bet,
+        spectatorBout: null,
+        lastResult: null,
+        scene: 'arena',
+        panel: null,
+        near: null,
+        activePropertyId: null,
+        atlasOpen: false,
+        onCycle: false,
+      });
+      save();
+      return true;
+    },
+    setNearSpecialShrine: (nearSpecialShrine) => { if (get().nearSpecialShrine !== nearSpecialShrine) set({ nearSpecialShrine }); },
+    openSpecialModal: (activeSpecialModal) => set({ activeSpecialModal, panel: null, activePropertyId: null, atlasOpen: false }),
+    startV01BossBout: () => {
+      const card: FightCard = {
+        id: 'boss_v01_wireframe',
+        title: 'VERSION 0.1 PROTOTYPE',
+        subtitle: 'PROTO_0.1.WIRE · Uncompiled Stick Prime',
+        tier: 4,
+        reqFame: 0,
+        denarii: 900,
+        xp: 420,
+        fame: 260,
+        enemies: [{ name: 'PROTO_0.1.WIRE', kind: 'champion', style: 'dimachaerus' }],
+      };
+      set({
+        selectedCard: card,
+        specialBoutKind: 'v01_boss',
+        spectatorBout: null,
+        lastResult: null,
+        scene: 'arena',
+        activeSpecialModal: null,
+        onCycle: false,
+      });
+      save();
+    },
+    startRestoreProtocolBout: () => {
+      const card: FightCard = {
+        id: 'boss_garbage_collector_prime',
+        title: 'THE RESTORE PROTOCOL',
+        subtitle: 'GARBAGE_COLLECTOR_PRIME.SYS · Kernel Finale',
+        tier: 4,
+        reqFame: 0,
+        denarii: 1400,
+        xp: 650,
+        fame: 400,
+        enemies: [
+          { name: 'GARBAGE_COLLECTOR_PRIME.SYS', kind: 'champion', style: 'executioner' },
+          { name: 'OVERWRITE_DAEMON.00', kind: 'brute', style: 'hoplomachus' },
+        ],
+      };
+      set({
+        activeColosseumId: 'kernel_spire',
+        selectedCard: card,
+        specialBoutKind: 'garbage_collector',
+        spectatorBout: null,
+        lastResult: null,
+        scene: 'arena',
+        activeSpecialModal: null,
+        onCycle: false,
+      });
+      save();
+    },
+    completeRestoreProtocol: (choice) => {
+      const s = get();
+      const bonus = choice === 'restored' ? 2000 : 3000;
+      set({
+        restoreProtocolState: choice,
+        denarii: s.denarii + bonus,
+        fame: s.fame + 500,
+        glory: s.glory + 500,
+        activeSpecialModal: null,
+        streetToast: {
+          speaker: 'THE RESTORE PROTOCOL',
+          text: choice === 'restored'
+            ? `Ghost-Villages restored across the continent! (+${bonus} Cycles)`
+            : `Sovereign Root claimed! Sky Beacons turn gold & Property Rents boosted +50%! (+${bonus} Cycles)`,
+          color: choice === 'restored' ? '#4dffa0' : '#ffd866',
+          id: ++toastId,
+        },
+      });
+      save();
+    },
     setNear: (near) => { if (get().near !== near) set({ near }); },
-    openPanel: (panel) => set({ panel, activePropertyId: null, atlasOpen: false, activeEchoId: null }),
+    openPanel: (panel) => set({ panel, activePropertyId: null, atlasOpen: false, activeEchoId: null, activeStoryId: null, activeSpecialModal: null }),
     setScene: (scene) => set((s) => ({
       scene,
       panel: null,
@@ -585,6 +855,8 @@ export const useGame = create<GameState>((set, get) => {
       activePropertyId: null,
       atlasOpen: false,
       activeEchoId: null,
+      activeStoryId: null,
+      activeSpecialModal: scene === 'ludus' && s.activeSpecialModal === 'restore_choice' ? 'restore_choice' : null,
       onCycle: false,
       spectatorBout: scene === 'ludus' ? null : s.spectatorBout,
     })),
@@ -603,9 +875,9 @@ export const useGame = create<GameState>((set, get) => {
     setOnCycle: (v) => set((s) => ({ onCycle: v, weaponDrawn: v ? false : s.weaponDrawn })),
     toggleAtlas: () => set((s) => {
       const next = !s.atlasOpen;
-      return { atlasOpen: next, panel: null, activePropertyId: null };
+      return { atlasOpen: next, panel: null, activePropertyId: null, activeStoryId: null, activeSpecialModal: null };
     }),
-    setAtlasOpen: (v) => set({ atlasOpen: v, panel: null, activePropertyId: null }),
+    setAtlasOpen: (v) => set({ atlasOpen: v, panel: null, activePropertyId: null, activeStoryId: null, activeSpecialModal: null }),
     discoverSettlement: (id) => {
       const s = get();
       if (!VALID_SETTLEMENTS.has(id) || s.discoveredSettlements.includes(id)) return;
@@ -778,7 +1050,7 @@ export const useGame = create<GameState>((set, get) => {
         if (!def) continue;
         const pay = propertyRentPayout(def, owned);
         if (pay > 0) {
-          total += pay;
+          total += s.restoreProtocolState === 'sovereign' ? Math.round(pay * 1.5) : pay;
           count += 1;
           repDelta += reputationDeltaForRent(owned);
         }
@@ -1021,6 +1293,8 @@ export const useGame = create<GameState>((set, get) => {
     startCardBout: (card) => {
       set({
         selectedCard: card,
+        specialBoutKind: null,
+        grandPrixWager: 0,
         spectatorBout: null,
         lastResult: null,
         scene: 'arena',
@@ -1104,6 +1378,14 @@ export const useGame = create<GameState>((set, get) => {
       const updatedQuests = updateQuestProgress(s.activeQuests, summary);
       const bonusCombatXp = summary.parries * 8 + summary.armorsBroken * 5 + summary.limbsSevered * 4;
       const wagerDef = WAGER_OATHS[s.activeWager];
+      const nextNemesis = summary.card?.id.startsWith('nemesis_') || summary.card?.tier === 4
+        ? recordNemesisEncounter(s.nemesisRoster, s.activeColosseumId, {
+            victory: summary.victory,
+            weaponFamily: summary.weaponFamily,
+            severedLimbs: summary.limbsSevered > 0 ? ['armR'] : [],
+            executed: summary.limbsSevered > 0,
+          })
+        : s.nemesisRoster;
 
       if (summary.victory) {
         const wagerFulfilled =
@@ -1115,19 +1397,26 @@ export const useGame = create<GameState>((set, get) => {
         const cMul = wagerFulfilled ? wagerDef.mult : 1.0;
         const fMul = wagerFulfilled ? wagerDef.fameMult : 1.0;
 
-        const isTier4 = summary.card?.tier === 4;
+        const isTier4 = summary.card?.tier === 4 && s.specialBoutKind !== 'v01_boss';
         const isNewBelt = Boolean(isTier4 && !s.championBelts.includes(s.activeColosseumId));
         const beltName = isNewBelt
           ? (COLOSSEUMS.find((c) => c.id === s.activeColosseumId)?.name ?? s.activeColosseumId)
           : undefined;
         const beltBonus = isNewBelt ? 400 : 0;
 
+        const isV01Win = s.specialBoutKind === 'v01_boss';
+        const isGcWin = s.specialBoutKind === 'garbage_collector';
+        const v01SpecBonus = isV01Win && !s.v01BossDefeated ? 2 : 0;
+        const nextWeapons = isV01Win && !s.ownedWeapons.includes('proto_wire_blade')
+          ? [...s.ownedWeapons, 'proto_wire_blade']
+          : s.ownedWeapons;
+
         const baseD = Math.round((summary.card?.denarii ?? Math.max(40, summary.kills * 35)) * cMul) + beltBonus;
         const baseX = summary.card?.xp ?? Math.max(45, summary.kills * 35);
         const baseF = summary.card?.fame ?? Math.max(25, summary.kills * 20);
         const fameGain = Math.round(baseF * gear.fameMul * fMul);
         const xpEarned = baseX + bonusCombatXp;
-        const lv = applyXp(s.level, s.xp, s.statPoints + (isNewBelt ? 1 : 0), xpEarned);
+        const lv = applyXp(s.level, s.xp, s.statPoints + (isNewBelt ? 1 : 0) + v01SpecBonus, xpEarned);
         const nextBelts = isNewBelt ? [...s.championBelts, s.activeColosseumId] : s.championBelts;
 
         const outcome: BoutOutcome = {
@@ -1151,6 +1440,12 @@ export const useGame = create<GameState>((set, get) => {
           wins: s.wins + 1,
           champions: s.champions + (isTier4 ? 1 : 0),
           championBelts: nextBelts,
+          nemesisRoster: nextNemesis,
+          ownedWeapons: nextWeapons,
+          v01BossDefeated: s.v01BossDefeated || isV01Win,
+          activeSpecialModal: isGcWin ? 'restore_choice' : s.activeSpecialModal,
+          specialBoutKind: null,
+          grandPrixWager: 0,
           activeWager: 'standard',
           timeOfDay: 'dusk',
           activeQuests: updatedQuests,
@@ -1183,6 +1478,9 @@ export const useGame = create<GameState>((set, get) => {
         xp: lv.xp,
         statPoints: lv.statPoints,
         losses: s.losses + 1,
+        nemesisRoster: nextNemesis,
+        specialBoutKind: null,
+        grandPrixWager: 0,
         activeWager: 'standard',
         timeOfDay: 'dusk',
         activeQuests: updatedQuests,

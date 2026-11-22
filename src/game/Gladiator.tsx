@@ -1,7 +1,7 @@
 import { forwardRef, useRef, useImperativeHandle, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { Atk, LimbKey, StanceHeight, State } from './arena/combat';
+import type { Atk, FinisherChoreo, HitReaction, LimbKey, StanceHeight, State } from './arena/combat';
 import { moveOf, type ArmorKey, type MoveMotion, type StyleId } from './arena/styles';
 import { gearFromStyle, type GearVisuals } from './rpg/items';
 import { makeCurvedBasicMaterial } from './art/curvature';
@@ -58,6 +58,20 @@ export interface Pose {
   turnRate?: number;
   /** 0..1 landing impact knee-absorption squash impulse */
   landSquash?: number;
+  /** Directional 4-step hit reaction type and remaining duration */
+  hitReaction?: HitReaction;
+  hitReactionT?: number;
+  /** Unique [E] weapon-family Finisher choreography and remaining duration */
+  finisherChoreo?: FinisherChoreo;
+  finisherT?: number;
+  /** Cybernetic prosthetic flags for returning Nemesis rivals */
+  cyberLimbs?: Partial<Record<LimbKey, boolean>>;
+  /** Socketed Echo Core energy hue along weapon */
+  coreColor?: string | null;
+  /** Secret Version 0.1 wireframe boss override */
+  wireframeBoss?: boolean;
+  /** Active [T] Crowd Favor taunt timer */
+  taunting?: number;
 }
 
 export interface GladiatorHandle { group: THREE.Group; pose: Pose; setMoving: (speed01: number) => void }
@@ -96,7 +110,17 @@ export const Gladiator = forwardRef<GladiatorHandle, {
     const weaponGroupR = useRef<THREE.Group>(null!);
     const snareMesh = useRef<THREE.Mesh>(null!);
     const glintMesh = useRef<THREE.Mesh>(null!);
+    const coreRuneR = useRef<THREE.Mesh>(null!);
     const cape0 = useRef<THREE.Group>(null!), cape1 = useRef<THREE.Group>(null!), cape2 = useRef<THREE.Group>(null!);
+    const dustRefs = [useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!), useRef<THREE.Mesh>(null!)];
+    const dustState = useRef<{ life: number; x: number; z: number }[]>([
+      { life: 0, x: 0, z: 0 },
+      { life: 0, x: 0, z: 0 },
+      { life: 0, x: 0, z: 0 },
+      { life: 0, x: 0, z: 0 },
+    ]);
+    const dustIdx = useRef(0);
+    const prevSinL = useRef(0);
 
     const speed = useRef(0);
     const phase = useRef(0);
@@ -114,6 +138,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
       amber: new THREE.Color('#ffae33'),
       crimson: new THREE.Color('#ff2e4c'),
       warn: new THREE.Color('#ff4433'),
+      cyber: new THREE.Color('#9be7ff'),
+      proto: new THREE.Color('#4dffa0'),
       white: new THREE.Color('#ffffff'),
       black: new THREE.Color('#000000'),
     }), [color, accent]);
@@ -141,6 +167,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         eye: makeCurvedBasicMaterial({ color: colors.gear }),
         net: makeCurvedBasicMaterial({ color: '#3ff0ff', wireframe: true, transparent: true, opacity: 0.72 }),
         glint: makeCurvedBasicMaterial({ color: '#fff5c0' }),
+        coreRune: makeCurvedBasicMaterial({ color: '#3ff0ff', transparent: true, opacity: 0.92 }),
+        dust: makeCurvedBasicMaterial({ color: '#8ae8ff', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
         shadow: makeCurvedBasicMaterial({ color: '#04020a', transparent: true, opacity: 0.62 }),
         ring: makeCurvedBasicMaterial({ color: colors.gear, transparent: true, opacity: 0.68 }),
       };
@@ -584,8 +612,122 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         headX = 0.35;
         shLX = -0.25; shRX = -0.25;
       }
+      // Directional 4-step Hit Reactions (head_snap, gut_crunch, chest_recoil, leg_trip)
+      if ((p.hitReactionT ?? 0) > 0 && p.state === 'stagger') {
+        const rk = Math.min(1, (p.hitReactionT ?? 0) / 0.42);
+        if (p.hitReaction === 'head_snap') {
+          headX = -0.78 * rk;
+          upperX = -0.46 * rk;
+          shLZ = 0.55; shRZ = -0.55;
+        } else if (p.hitReaction === 'gut_crunch') {
+          pelvisY -= 0.20 * rk;
+          upperX = 0.68 * rk;
+          headX = 0.42 * rk;
+          shLX = 0.35; shRX = 0.35;
+          elLX = -1.45; elRX = -1.45;
+        } else if (p.hitReaction === 'leg_trip') {
+          pelvisY -= 0.26 * rk;
+          rootRoll = 0.44 * rk;
+          hipLX = -0.78 * rk; kneeLX = 1.15 * rk;
+          hipRX = 0.42 * rk; kneeRX = 0.85 * rk;
+        } else {
+          upperX = -0.52 * rk;
+          upperY = 0.32 * rk;
+          shLZ = 0.68; shRZ = -0.68;
+        }
+      }
+      // 5 Unique Weapon-Family [E] Finisher Choreographies
+      if ((p.finisherT ?? 0) > 0 && p.finisherChoreo) {
+        const fk = 1 - Math.min(1, (p.finisherT ?? 0) / 0.65);
+        blend = 28;
+        switch (p.finisherChoreo) {
+          case 'spear_impale':
+            pelvisY -= 0.14;
+            upperX = THREE.MathUtils.lerp(-0.18, 0.52, fk);
+            shRX = THREE.MathUtils.lerp(0.65, -2.05, fk);
+            elRX = THREE.MathUtils.lerp(-1.55, -0.04, fk);
+            shLX = -1.25;
+            break;
+          case 'twin_scissor':
+            upperX = 0.45;
+            shRX = -1.45; shLX = -1.45;
+            shRZ = THREE.MathUtils.lerp(-1.3, 1.05, fk);
+            shLZ = THREE.MathUtils.lerp(1.3, -1.05, fk);
+            elRX = -0.15; elLX = -0.15;
+            break;
+          case 'hammer_flatten':
+            pelvisY -= 0.28 * fk;
+            upperX = THREE.MathUtils.lerp(-0.42, 0.72, fk);
+            shRX = THREE.MathUtils.lerp(-3.1, 0.32, fk);
+            shLX = THREE.MathUtils.lerp(-2.9, 0.28, fk);
+            elRX = -0.1; elLX = -0.1;
+            break;
+          case 'trident_pin':
+            pelvisY -= 0.16;
+            upperY = THREE.MathUtils.lerp(-0.85, 0.75, fk);
+            shRX = THREE.MathUtils.lerp(0.45, -1.65, fk);
+            shLX = -1.1; shLZ = -0.55;
+            break;
+          default: // gladius_throat
+            pelvisY -= 0.1;
+            upperY = THREE.MathUtils.lerp(-0.6, 0.95, fk);
+            upperX = 0.38;
+            shRX = -1.52; shRZ = THREE.MathUtils.lerp(-0.9, 0.85, fk);
+            elRX = -0.1;
+            break;
+        }
+      }
+      // [T] Crowd Favor Victory Roar Taunt
+      if ((p.taunting ?? 0) > 0 && p.state === 'idle') {
+        const tk = Math.min(1, (p.taunting ?? 0) / 0.9);
+        upperX = -0.22 * tk;
+        headX = -0.28 * tk;
+        shLX = -2.45 * tk; shLZ = 0.58; elLX = -0.25;
+        shRX = -2.45 * tk; shRZ = -0.58; elRX = -0.25;
+      }
 
-      // Apply smooth damping to every joint (including vertical airY, pelvis yaw twist & ankle articulation)
+      // Heel-strike footstep dust/spark puffs
+      const crossedPos = prevSinL.current <= 0 && sinL > 0;
+      const crossedNeg = prevSinL.current >= 0 && sinL < 0;
+      prevSinL.current = sinL;
+      if ((moveMag > 0.22 && (crossedPos || crossedNeg) && (p.airY ?? 0) < 0.08) || squash > 0.72) {
+        const slot = dustState.current[dustIdx.current % 4];
+        dustIdx.current++;
+        slot.life = 0.26;
+        slot.x = crossedPos ? 0.14 : -0.14;
+        slot.z = -0.06;
+      }
+      for (let i = 0; i < 4; i++) {
+        const dMesh = dustRefs[i].current;
+        const stDust = dustState.current[i];
+        if (!dMesh) continue;
+        if (stDust.life > 0) {
+          stDust.life = Math.max(0, stDust.life - dt);
+          const age = 1 - stDust.life / 0.26;
+          dMesh.visible = true;
+          dMesh.position.set(stDust.x, 0.04 + age * 0.16, stDust.z - age * 0.25);
+          dMesh.scale.setScalar(0.55 + age * 1.45);
+          dMesh.rotation.y += dt * 7;
+        } else {
+          dMesh.visible = false;
+        }
+      }
+
+      // Echo Core weapon rune crystal animation
+      if (coreRuneR.current) {
+        const hasCore = Boolean(p.coreColor) && armed && !p.weaponDisarmed;
+        coreRuneR.current.visible = hasCore;
+        if (hasCore && p.coreColor) {
+          mats.coreRune.color.set(p.coreColor);
+          coreRuneR.current.rotation.y = clock.elapsedTime * 5.2;
+          coreRuneR.current.rotation.z = clock.elapsedTime * 3.1;
+          coreRuneR.current.scale.setScalar(0.92 + Math.sin(clock.elapsedTime * 10) * 0.14);
+        }
+      }
+
+      // Apply smooth damping + micro impact jitter on hurt
+      const impactJitter = p.hurt > 0.25 ? Math.sin(clock.elapsedTime * 68) * 0.04 * p.hurt : 0;
+      upper.current.position.x = impactJitter;
       root.current.position.y = smooth(root.current.position.y, pelvisY + (p.airY ?? 0), blend, dt);
       root.current.rotation.x = smooth(root.current.rotation.x, rootPitch, blend, dt);
       root.current.rotation.y = smooth(root.current.rotation.y, rootYaw, blend, dt);
@@ -627,10 +769,22 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         cape0.current.rotation.z = smooth(cape0.current.rotation.z, -lvx * 0.25 - upper.current.rotation.y * 0.3, 10, dt);
       }
 
-      // Per-limb colors & emissive damage hints (intact -> amber -> pulsing crimson) + telegraph/hurt
+      // Per-limb colors & emissive damage hints + cyber-limb prosthetics + Version 0.1 wireframe boss override
       const pulse = 0.5 + 0.5 * Math.sin(clock.elapsedTime * 22);
-      const tint = (mat: THREE.MeshLambertMaterial, ratio: number) => {
-        if (ratio > 0.65) {
+      const isWire = Boolean(p.wireframeBoss);
+      const tint = (mat: THREE.MeshLambertMaterial, ratio: number, cyber?: boolean) => {
+        mat.wireframe = isWire;
+        if (isWire) {
+          mat.color.copy(colors.proto);
+          mat.emissive.copy(colors.proto);
+          mat.emissiveIntensity = 0.72 + pulse * 0.25;
+          return;
+        }
+        if (cyber && ratio > 0.3) {
+          mat.color.copy(colors.cyber);
+          mat.emissive.copy(colors.cyber);
+          mat.emissiveIntensity = 0.48;
+        } else if (ratio > 0.65) {
           mat.color.copy(colors.base);
           mat.emissive.copy(colors.black);
           mat.emissiveIntensity = 0;
@@ -653,12 +807,15 @@ export const Gladiator = forwardRef<GladiatorHandle, {
           mat.emissiveIntensity = Math.max(mat.emissiveIntensity, p.hurt > 0.35 ? 0.92 : p.hurt * 0.85);
         }
       };
-      tint(mats.head, limbs?.head.ratio ?? 1);
-      tint(mats.torso, limbs?.torso.ratio ?? 1);
-      tint(mats.armL, limbs?.armL.ratio ?? 1);
-      tint(mats.armR, limbs?.armR.ratio ?? 1);
-      tint(mats.legL, limbs?.legL.ratio ?? 1);
-      tint(mats.legR, limbs?.legR.ratio ?? 1);
+      tint(mats.head, limbs?.head.ratio ?? 1, p.cyberLimbs?.head);
+      tint(mats.torso, limbs?.torso.ratio ?? 1, p.cyberLimbs?.torso);
+      tint(mats.armL, limbs?.armL.ratio ?? 1, p.cyberLimbs?.armL);
+      tint(mats.armR, limbs?.armR.ratio ?? 1, p.cyberLimbs?.armR);
+      tint(mats.legL, limbs?.legL.ratio ?? 1, p.cyberLimbs?.legL);
+      tint(mats.legR, limbs?.legR.ratio ?? 1, p.cyberLimbs?.legR);
+      mats.bronze.wireframe = isWire;
+      mats.iron.wireframe = isWire;
+      mats.gearPaint.wireframe = isWire;
 
       const gold = colors.amber;
       const rip = p.riposte ?? 0;
@@ -677,10 +834,15 @@ export const Gladiator = forwardRef<GladiatorHandle, {
 
     return (
       <group ref={group} scale={scale}>
-        {/* Grounded low-poly PS1 drop shadow */}
+        {/* Grounded low-poly PS1 drop shadow + heel-strike dust puffs */}
         <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.shadow}>
           <circleGeometry args={[0.52, 8]} />
         </mesh>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={`dust-${i}`} ref={dustRefs[i]} visible={false} rotation={[-Math.PI / 2, 0, 0]} material={mats.dust}>
+            <ringGeometry args={[0.07, 0.16, 6]} />
+          </mesh>
+        ))}
 
         <group ref={root} position={[0, 0.92, 0]}>
           {/* Pelvis + bronze waist belt */}
@@ -706,6 +868,9 @@ export const Gladiator = forwardRef<GladiatorHandle, {
               <mesh position={[0, -0.18, 0.038]} material={mats.bronze}>
                 <boxGeometry args={[0.088, 0.25, 0.05]} />
               </mesh>
+              <mesh position={[0.05, -0.17, 0.01]} rotation={[0, 0, -0.15]} material={mats.gearPaint}>
+                <boxGeometry args={[0.025, 0.22, 0.08]} />
+              </mesh>
               <group ref={footL} position={[0, -0.40, 0]}>
                 <mesh position={[0, -0.02, 0.035]} material={mats.leather}>
                   <boxGeometry args={[0.10, 0.09, 0.17]} />
@@ -729,6 +894,9 @@ export const Gladiator = forwardRef<GladiatorHandle, {
               <mesh position={[0, -0.18, 0.038]} material={mats.bronze}>
                 <boxGeometry args={[0.088, 0.25, 0.05]} />
               </mesh>
+              <mesh position={[-0.05, -0.17, 0.01]} rotation={[0, 0, 0.15]} material={mats.gearPaint}>
+                <boxGeometry args={[0.025, 0.22, 0.08]} />
+              </mesh>
               <group ref={footR} position={[0, -0.40, 0]}>
                 <mesh position={[0, -0.02, 0.035]} material={mats.leather}>
                   <boxGeometry args={[0.10, 0.09, 0.17]} />
@@ -748,9 +916,15 @@ export const Gladiator = forwardRef<GladiatorHandle, {
             <mesh position={[0, 0.02, 0]} scale={[1, 1, 0.72]} material={mats.leather}>
               <cylinderGeometry args={[0.17, 0.23, 0.24, 6]} />
             </mesh>
-            {/* Tapered 6-sided chest */}
+            {/* Tapered 6-sided chest + sculpted angular PS1 sternum & collar gorget */}
             <mesh position={[0, 0.34, 0]} scale={[1.05, 1, 0.66]} material={mats.torso}>
               <cylinderGeometry args={[0.23, 0.15, 0.48, 6]} />
+            </mesh>
+            <mesh position={[0, 0.36, 0.11]} rotation={[0.08, Math.PI / 4, 0]} material={mats.gearPaint}>
+              <cylinderGeometry args={[0.14, 0.08, 0.36, 4]} />
+            </mesh>
+            <mesh position={[0, 0.56, 0.01]} scale={[1.1, 1, 0.78]} material={mats.bronze}>
+              <cylinderGeometry args={[0.17, 0.21, 0.08, 6]} />
             </mesh>
             {/* Diagonal bronze harness strap */}
             <mesh position={[0, 0.34, 0.01]} rotation={[0, 0, 0.56]} material={mats.bronze}>
@@ -889,6 +1063,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
               <group ref={elL} position={[0, -0.34, 0]}>
                 <mesh position={[0, -0.15, 0]} material={mats.armL}><cylinderGeometry args={[0.062, 0.048, 0.30, 5]} /></mesh>
                 <mesh position={[0, -0.22, 0]} material={mats.bronze}><cylinderGeometry args={[0.068, 0.058, 0.14, 5]} /></mesh>
+                <mesh position={[-0.052, -0.20, 0]} material={mats.gearPaint}><boxGeometry args={[0.025, 0.16, 0.07]} /></mesh>
+                <mesh position={[0.052, -0.20, 0]} material={mats.gearPaint}><boxGeometry args={[0.025, 0.16, 0.07]} /></mesh>
                 <mesh position={[0, -0.32, 0]} material={mats.leather}><boxGeometry args={[0.08, 0.09, 0.09]} /></mesh>
                 {armed && v.offhand === 'scutum' && (
                   <group position={[0.08, -0.22, 0.14]}>
@@ -928,6 +1104,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
               <group ref={elR} position={[0, -0.34, 0]}>
                 <mesh position={[0, -0.15, 0]} material={mats.armR}><cylinderGeometry args={[0.062, 0.048, 0.30, 5]} /></mesh>
                 <mesh position={[0, -0.22, 0]} material={mats.bronze}><cylinderGeometry args={[0.068, 0.058, 0.14, 5]} /></mesh>
+                <mesh position={[-0.052, -0.20, 0]} material={mats.gearPaint}><boxGeometry args={[0.025, 0.16, 0.07]} /></mesh>
+                <mesh position={[0.052, -0.20, 0]} material={mats.gearPaint}><boxGeometry args={[0.025, 0.16, 0.07]} /></mesh>
                 <mesh position={[0, -0.32, 0]} material={mats.leather}><boxGeometry args={[0.08, 0.09, 0.09]} /></mesh>
                 <group ref={weaponGroupR}>
                   {armed && v.weapon === 'gladius' && (
@@ -967,6 +1145,9 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                       <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.085, 0.30, 4]} /></mesh>
                     </group>
                   )}
+                  <mesh ref={coreRuneR} position={[0, -0.62, 0]} visible={false} material={mats.coreRune}>
+                    <octahedronGeometry args={[0.11, 0]} />
+                  </mesh>
                 </group>
                 <mesh
                   ref={glintMesh}

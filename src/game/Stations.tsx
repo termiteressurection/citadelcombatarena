@@ -50,18 +50,40 @@ function NeonStrip({ position, args, color }: { position: [number, number, numbe
 
 function Bunk({ s }: { s: Station }) {
   const m = useMemo(getMats, []);
+  const belts = useGame((g) => g.championBelts);
+  const echoes = useGame((g) => g.claimedEchoes);
   return (
     <group>
-      <mesh position={[0, 0.2, 0]} material={m.hullDark}><boxGeometry args={[4.4, 0.4, 3.6]} /></mesh>
-      <mesh position={[0, 1.55, -0.3]} material={m.hull}><boxGeometry args={[3.8, 2.3, 2.6]} /></mesh>
-      <mesh position={[0, 3.25, -0.3]} rotation={[0, Math.PI / 4, 0]} material={m.circuit}><coneGeometry args={[3.1, 1.4, 4]} /></mesh>
-      {/* Cryo/Defrag Memory Pod */}
-      <mesh position={[-0.2, 0.65, 1.25]} material={m.conduit}><boxGeometry args={[2.1, 0.45, 1.0]} /></mesh>
-      <mesh position={[-0.95, 0.92, 1.25]} material={m.gold}><boxGeometry args={[0.5, 0.2, 0.85]} /></mesh>
-      <mesh position={[0.15, 0.88, 1.25]} material={m.banner}><boxGeometry args={[1.4, 0.14, 0.92]} /></mesh>
-      <NeonStrip position={[0, 2.75, 1.04]} args={[3.2, 0.12, 0.12]} color={s.color} />
-      <NeonStrip position={[1.35, 1.2, 1.2]} args={[0.24, 0.34, 0.24]} color={s.color} />
-      <pointLight position={[1.3, 1.6, 1.5]} color={s.color} intensity={8} distance={12} decay={1.6} />
+      {/* Walk-inside Open-Front Trophy Sanctuary Pavilion */}
+      <mesh position={[0, 0.14, 0]} material={m.hullDark}><boxGeometry args={[5.2, 0.28, 4.6]} /></mesh>
+      <mesh position={[0, 0.29, 0.35]} material={m.grid}><boxGeometry args={[4.2, 0.04, 3.6]} /></mesh>
+      {/* Back Trophy Wall & Side Pillars */}
+      <mesh position={[0, 1.85, -1.75]} material={m.hull}><boxGeometry args={[4.8, 3.1, 0.42]} /></mesh>
+      <mesh position={[-2.15, 1.85, -0.25]} material={m.conduit}><boxGeometry args={[0.45, 3.1, 3.2]} /></mesh>
+      <mesh position={[2.15, 1.85, -0.25]} material={m.conduit}><boxGeometry args={[0.45, 3.1, 3.2]} /></mesh>
+      <mesh position={[-2.15, 1.85, 1.65]} material={m.gold}><boxGeometry args={[0.42, 3.2, 0.42]} /></mesh>
+      <mesh position={[2.15, 1.85, 1.65]} material={m.gold}><boxGeometry args={[0.42, 3.2, 0.42]} /></mesh>
+      <mesh position={[0, 3.55, 0]} material={m.circuit}><boxGeometry args={[5.1, 0.36, 4.2]} /></mesh>
+      <mesh position={[0, 4.35, -0.1]} rotation={[0, Math.PI / 4, 0]} material={m.circuit}><coneGeometry args={[3.6, 1.4, 4]} /></mesh>
+      {/* Interior Defrag Pod & Wall Weapon Rack */}
+      <mesh position={[-1.05, 0.56, -0.45]} material={m.conduit}><boxGeometry args={[1.65, 0.48, 0.95]} /></mesh>
+      <mesh position={[-1.05, 0.85, -0.45]} material={m.banner}><boxGeometry args={[1.45, 0.14, 0.85]} /></mesh>
+      <mesh position={[1.15, 1.75, -1.46]} material={m.chrome}><boxGeometry args={[0.14, 1.45, 0.1]} /></mesh>
+      <mesh position={[1.15, 1.25, -1.46]} material={m.gold}><boxGeometry args={[0.38, 0.08, 0.12]} /></mesh>
+      {/* Mounted Sector Champion Belts on Back Wall */}
+      {belts.slice(0, 5).map((bId, i) => (
+        <mesh key={bId} position={[-1.2 + i * 0.6, 2.55, -1.48]} material={m.gold}>
+          <torusGeometry args={[0.19, 0.055, 5, 10]} />
+        </mesh>
+      ))}
+      {/* Spinning Decrypted Memory Echo Trophy Crystals */}
+      {echoes.slice(0, 6).map((eId, i) => (
+        <mesh key={eId} position={[-1.3 + i * 0.52, 1.78, -1.48]} material={m.banner}>
+          <octahedronGeometry args={[0.13, 0]} />
+        </mesh>
+      ))}
+      <NeonStrip position={[0, 3.28, 1.95]} args={[4.4, 0.12, 0.14]} color={s.color} />
+      <pointLight position={[0, 2.4, 0.2]} color={s.color} intensity={10} distance={14} decay={1.5} />
     </group>
   );
 }
