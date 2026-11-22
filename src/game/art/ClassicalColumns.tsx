@@ -20,12 +20,12 @@ let sharedMats: {
 
 function getColumnMats() {
   if (!sharedMats) {
-    const stoneTex = cloneTex(getPs1Texture('stone'), 2, 4);
-    const bronzeTex = cloneTex(getPs1Texture('bronze'), 2, 1);
+    const stoneTex = cloneTex(getPs1Texture('conduit'), 2, 4);
+    const bronzeTex = cloneTex(getPs1Texture('circuit'), 2, 1);
     sharedMats = {
-      stone: makePs1Material({ color: '#ddd4ea', map: stoneTex }),
-      stoneAccent: makePs1Material({ color: '#b8aecb', map: stoneTex }),
-      bronze: makePs1Material({ color: '#ffd98a', map: bronzeTex }),
+      stone: makePs1Material({ color: '#272c4a', map: stoneTex, emissive: '#0c1d33', emissiveIntensity: 0.3 }),
+      stoneAccent: makePs1Material({ color: '#1b1f38', map: stoneTex }),
+      bronze: makePs1Material({ color: '#4de8ff', map: bronzeTex, emissive: '#3ff0ff', emissiveIntensity: 0.45 }),
     };
   }
   return sharedMats;

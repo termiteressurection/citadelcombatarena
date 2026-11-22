@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Gladiator, type GladiatorHandle, type LimbPose } from './Gladiator';
 import { Brazier, Ps1Sky } from './art/Ps1Sky';
+import { setCurvature } from './art/curvature';
 import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import Starfield from './art/Starfield';
 import {
@@ -630,18 +631,18 @@ function SeveredPieceView({ w, piece }: { w: ArenaWorld; piece: SeveredPiece }) 
 
 function Ring() {
   const mats = useMemo(() => {
-    const sandTex = cloneTex(getPs1Texture('sand'), 9, 9);
-    const stoneWallTex = cloneTex(getPs1Texture('stone'), 16, 1.5);
-    const stoneCapTex = cloneTex(getPs1Texture('stone'), 2, 2);
+    const sandTex = cloneTex(getPs1Texture('grid'), 11, 11);
+    const stoneWallTex = cloneTex(getPs1Texture('circuit'), 16, 1.5);
+    const stoneCapTex = cloneTex(getPs1Texture('conduit'), 2, 2);
     const bronzeTex = getPs1Texture('bronze');
     return {
-      sand: makePs1Material({ color: '#e6caa0', map: sandTex }),
-      stoneWall: makePs1Material({ color: '#cac0d8', map: stoneWallTex, side: THREE.DoubleSide }),
-      stoneCap: makePs1Material({ color: '#cfc5df', map: stoneCapTex }),
-      bronze: makePs1Material({ color: '#ffd480', map: bronzeTex }),
+      sand: makePs1Material({ color: '#8ae8ff', map: sandTex, emissive: '#0c2d42', emissiveIntensity: 0.4 }),
+      stoneWall: makePs1Material({ color: '#394678', map: stoneWallTex, side: THREE.DoubleSide, emissive: '#10213d', emissiveIntensity: 0.35 }),
+      stoneCap: makePs1Material({ color: '#2b3661', map: stoneCapTex, emissive: '#0e283b', emissiveIntensity: 0.4 }),
+      bronze: makePs1Material({ color: '#4deeff', map: bronzeTex, emissive: '#22c2e8', emissiveIntensity: 0.5 }),
       iron: new THREE.MeshBasicMaterial({ color: '#07050c' }),
-      markGold: new THREE.MeshBasicMaterial({ color: '#e8b654', transparent: true, opacity: 0.45 }),
-      markCrimson: new THREE.MeshBasicMaterial({ color: '#ff385c', transparent: true, opacity: 0.42 }),
+      markGold: new THREE.MeshBasicMaterial({ color: '#3ff0ff', transparent: true, opacity: 0.65 }),
+      markCrimson: new THREE.MeshBasicMaterial({ color: '#ff4fd8', transparent: true, opacity: 0.55 }),
     };
   }, []);
 
@@ -709,22 +710,22 @@ function Ring() {
   );
 }
 
-const CROWD_COLORS = ['#c99b43', '#b8324c', '#5b4ca8', '#cfc8e0', '#8f5f3a'];
+const CROWD_COLORS = ['#3ff0ff', '#ff4fd8', '#ffc95c', '#a78bfa', '#4dffa0'];
 
 function Stands({ w }: { w: ArenaWorld }) {
   const mats = useMemo(() => {
-    const stoneTierTex = cloneTex(getPs1Texture('stone'), 20, 3);
-    const stonePierTex = cloneTex(getPs1Texture('stone'), 2, 4);
+    const stoneTierTex = cloneTex(getPs1Texture('circuit'), 20, 3);
+    const stonePierTex = cloneTex(getPs1Texture('conduit'), 2, 4);
     const bannerTex = getPs1Texture('banner');
     const bronzeTex = getPs1Texture('bronze');
     return {
-      tier: makePs1Material({ color: '#b4aac4', map: stoneTierTex, side: THREE.DoubleSide }),
-      pier: makePs1Material({ color: '#c8bfd8', map: stonePierTex }),
-      darkBay: new THREE.MeshBasicMaterial({ color: '#090612' }),
-      bronze: makePs1Material({ color: '#ffd37c', map: bronzeTex }),
-      banner: makePs1Material({ color: '#ffffff', map: bannerTex, side: THREE.DoubleSide }),
-      crowdBody: makePs1Material({ color: '#ffffff', map: getPs1Texture('tunic') }),
-      crowdHead: new THREE.MeshLambertMaterial({ color: '#e6d8f0', flatShading: true }),
+      tier: makePs1Material({ color: '#2b345c', map: stoneTierTex, side: THREE.DoubleSide, emissive: '#0c1a36', emissiveIntensity: 0.35 }),
+      pier: makePs1Material({ color: '#394678', map: stonePierTex, emissive: '#0e2840', emissiveIntensity: 0.35 }),
+      darkBay: new THREE.MeshBasicMaterial({ color: '#05040e' }),
+      bronze: makePs1Material({ color: '#4deeff', map: bronzeTex, emissive: '#22c2e8', emissiveIntensity: 0.45 }),
+      banner: makePs1Material({ color: '#3ff0ff', map: bannerTex, side: THREE.DoubleSide, emissive: '#1e78a8', emissiveIntensity: 0.4 }),
+      crowdBody: makePs1Material({ color: '#ffffff', map: getPs1Texture('tunic'), emissive: '#2a2252', emissiveIntensity: 0.45 }),
+      crowdHead: new THREE.MeshLambertMaterial({ color: '#e6f6ff', flatShading: true }),
     };
   }, []);
 
@@ -1069,6 +1070,7 @@ export function Arena() {
   const cardId = useGame((s) => s.selectedCard?.id ?? null);
   const [world, setWorld] = useState<ArenaWorld | null>(null);
   useEffect(() => {
+    setCurvature(0, 0, 0);
     let dead = false;
     let local: ArenaWorld | null = null;
     initPhysics().then(() => {

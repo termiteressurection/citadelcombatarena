@@ -1,5 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { CURVE_UNIFORMS, curveDrop } from './curvature';
 
 const BASE_FONT_PX = 128;
 const LINE_HEIGHT = 1.2;
@@ -58,6 +60,9 @@ export default function SpriteText({
 }: SpriteTextProps) {
   const text = textProp ?? children;
   if (text === undefined || text === null) return null;
+  const spriteRef = useRef<THREE.Sprite>(null!);
+  const worldVec = useRef(new THREE.Vector3());
+
   const { texture, aspect, lineCount } = useMemo(() => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
@@ -109,11 +114,22 @@ export default function SpriteText({
 
   useEffect(() => () => texture.dispose(), [texture]);
 
+  useFrame(() => {
+    const sp = spriteRef.current;
+    if (!sp) return;
+    sp.position.y = position[1];
+    sp.updateWorldMatrix(true, false);
+    sp.getWorldPosition(worldVec.current);
+    const org = CURVE_UNIFORMS.uCurveOrigin.value;
+    const drop = curveDrop(worldVec.current.x - org.x, worldVec.current.z - org.z);
+    if (drop > 0) sp.position.y = position[1] - drop;
+  });
+
   const height = Math.max(fontSize * lineCount * 1.2, fontSize);
   const width = height * aspect;
 
   return (
-    <sprite position={position} scale={[width, height, 1]} renderOrder={renderOrder}>
+    <sprite ref={spriteRef} position={position} scale={[width, height, 1]} renderOrder={renderOrder}>
       <spriteMaterial map={texture} transparent opacity={opacity} depthTest={depthTest} depthWrite={false} toneMapped={false} />
     </sprite>
   );

@@ -51,6 +51,7 @@ function TownStatusStrip() {
   const needXp = xpForNextLevel(g.level);
   const xpPct = Math.min(100, (g.xp / needXp) * 100);
   const gear = resolveLoadout(g.loadout);
+  const showStreetBars = g.weaponDrawn || g.streetVitals.hp < g.streetVitals.maxHp;
 
   return (
     <>
@@ -58,14 +59,14 @@ function TownStatusStrip() {
         className="ps1-box clickable"
         style={{
           position: 'absolute', top: 44, left: 20, padding: '10px 14px',
-          display: 'grid', gap: 6, width: 310,
+          display: 'grid', gap: 6, width: 325,
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, letterSpacing: '.14em' }}>
-          <span style={{ color: g.timeOfDay === 'morning' ? '#ffe57f' : '#ff9d5c' }}>
-            DAY {g.day} · {g.timeOfDay === 'morning' ? 'MORNING' : 'DUSK'}
+          <span style={{ color: g.timeOfDay === 'morning' ? '#3ff0ff' : '#ff4fd8' }}>
+            CYCLE {g.day} · {g.timeOfDay === 'morning' ? 'BOOT CYCLE' : 'PURGE DUSK'}
           </span>
-          <span style={{ color: rank.color }}>{rank.name} ({g.fame}F)</span>
+          <span style={{ color: rank.color }}>{rank.name} ({g.fame}S)</span>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
@@ -77,16 +78,31 @@ function TownStatusStrip() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, letterSpacing: '.1em' }}>
-          <span style={{ color: '#ffc95c', fontWeight: 700 }}>{g.denarii} DENARII</span>
+          <span style={{ color: '#ffc95c', fontWeight: 700 }}>{g.denarii} CYCLES</span>
           <span style={{ color: g.flasks > 0 ? '#4dffa0' : '#a99dc4' }}>
-            [H] FLASKS {g.flasks}/{MAX_FLASKS}
+            [H] RESTORES {g.flasks}/{MAX_FLASKS}
           </span>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 2 }}>
-          <span style={{ fontSize: 10, color: gear.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {gear.name}
-          </span>
+        {showStreetBars && (
+          <div style={{ display: 'grid', gap: 4, paddingTop: 2 }}>
+            <Bar v={g.streetVitals.hp} max={g.streetVitals.maxHp} color="#ff4f6d" w={292} />
+            <Bar v={g.streetVitals.st} max={g.streetVitals.maxSt} color="#4dffa0" w={220} />
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 2 }}>
+          <button
+            className="clickable btn"
+            style={{
+              padding: '4px 8px', fontSize: 10, letterSpacing: '.08em',
+              borderColor: g.weaponDrawn ? '#ff4f6d' : '#3ff0ff',
+              color: g.weaponDrawn ? '#ff4f6d' : '#3ff0ff',
+            }}
+            onClick={() => g.toggleWeaponDrawn()}
+          >
+            [X] {g.weaponDrawn ? 'BLADE DRAWN' : 'SHEATHED'}
+          </button>
           <button
             className="clickable btn"
             style={{
@@ -96,9 +112,20 @@ function TownStatusStrip() {
             }}
             onClick={() => g.openPanel(g.panel === 'locker' ? null : 'locker')}
           >
-            {g.statPoints > 0 ? `[C] +${g.statPoints} PTS!` : '[C] GEAR & STATS'}
+            {g.statPoints > 0 ? `[C] +${g.statPoints} SPECS!` : '[C] GEAR & SPECS'}
           </button>
         </div>
+
+        {g.bounty > 0 && (
+          <div
+            style={{
+              fontSize: 10, padding: '3px 8px', background: '#260814',
+              border: '1px solid #ff3b5c', color: '#ff4f6d', letterSpacing: '.12em', textAlign: 'center',
+            }}
+          >
+            SYSWATCH BOUNTY: {g.bounty} CYCLES
+          </div>
+        )}
 
         {g.dailyBuffs.length > 0 && (
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', paddingTop: 2 }}>
@@ -112,28 +139,32 @@ function TownStatusStrip() {
                     color: def?.color ?? '#ffc95c', background: '#07050e', letterSpacing: '.08em',
                   }}
                 >
-                  {b === 'honey_bread' ? '+25 HP' : b === 'iron_wine' ? '+25% STAM' : '+15% DMG'}
+                  {b === 'honey_bread' ? '+25 HP' : b === 'iron_wine' ? '+25% BW' : '+15% DMG'}
                 </span>
               );
             })}
           </div>
         )}
+
+        <div style={{ fontSize: 9, color: gear.color, opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          LOADOUT: {gear.name}
+        </div>
       </div>
 
-      {!g.panel && (
+      {!g.panel && !g.arrestPrompt && (
         <div
           className="ps1-box"
           style={{
             position: 'absolute', top: 52, right: 18, padding: '8px 12px',
-            display: 'grid', gap: 5, width: 250,
+            display: 'grid', gap: 5, width: 256,
           }}
         >
           <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.18em', borderBottom: '1px solid #c99b4344', paddingBottom: 4 }}>
-            ACTIVE CONTRACTS ({g.activeQuests.length}/3)
+            SYS CONTRACTS ({g.activeQuests.length}/3)
           </div>
           {g.activeQuests.length === 0 ? (
             <div style={{ fontSize: 10, color: '#a99dc4', letterSpacing: '.06em' }}>
-              Visit Contract Board (North-West Forum) for bounties.
+              Visit Bounty Terminal (-14, -30) for contracts.
             </div>
           ) : (
             g.activeQuests.map((q) => {
@@ -144,12 +175,143 @@ function TownStatusStrip() {
                     {q.title}
                   </span>
                   <span style={{ color: done ? '#4dffa0' : '#ffc95c', flexShrink: 0 }}>
-                    {done ? 'READY AT BOARD!' : `${q.progress}/${q.target}`}
+                    {done ? 'READY!' : `${q.progress}/${q.target}`}
                   </span>
                 </div>
               );
             })
           )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function StreetOverlays() {
+  const g = useGame();
+  const [showToast, setShowToast] = useState(false);
+
+  useEffect(() => {
+    if (!g.streetToast) { setShowToast(false); return; }
+    setShowToast(true);
+    const id = setTimeout(() => setShowToast(false), 5200);
+    return () => clearTimeout(id);
+  }, [g.streetToast?.id]);
+
+  if (g.scene !== 'ludus') return null;
+
+  return (
+    <>
+      {showToast && g.streetToast && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', top: 84, left: '50%', transform: 'translateX(-50%)',
+            padding: '8px 16px', maxWidth: 460, textAlign: 'center',
+            borderColor: g.streetToast.color, display: 'grid', gap: 3,
+          }}
+        >
+          <div style={{ fontSize: 10, letterSpacing: '.16em', color: g.streetToast.color, fontWeight: 700 }}>
+            {g.streetToast.speaker}
+          </div>
+          <div style={{ fontSize: 12, color: '#e9e6ff' }}>"{g.streetToast.text}"</div>
+        </div>
+      )}
+
+      {g.nearNpc && !g.panel && !g.arrestPrompt && !g.inJail && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', bottom: g.near ? 104 : 56, left: '50%', transform: 'translateX(-50%)',
+            padding: '8px 16px', minWidth: 320, textAlign: 'center', display: 'grid', gap: 5,
+            borderColor: g.nearNpc.hostile ? '#ff4f6d' : '#3ff0ff',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, fontSize: 11 }}>
+            <span style={{ color: g.nearNpc.hostile ? '#ff4f6d' : '#3ff0ff', fontWeight: 700 }}>{g.nearNpc.filename}</span>
+            <span style={{ color: '#ffc95c', fontSize: 10, letterSpacing: '.12em' }}>
+              {g.nearNpc.role.toUpperCase()} · {g.nearNpc.mood.toUpperCase()}
+            </span>
+          </div>
+          {g.nearNpc.hostile && <Bar v={g.nearNpc.hp} max={g.nearNpc.maxHp} color="#ff4f6d" w={290} />}
+          <div style={{ fontSize: 10, color: '#cfc6e8', letterSpacing: '.1em' }}>
+            [T] GREET · [G] PROVOKE · {g.weaponDrawn ? '[LMB/J/K] STRIKE' : '[X] DRAW BLADE'}
+          </div>
+        </div>
+      )}
+
+      {g.inJail && (
+        <div
+          className="ps1-box clickable"
+          style={{
+            position: 'absolute', bottom: 64, left: '50%', transform: 'translateX(-50%)',
+            padding: '14px 20px', width: 'min(480px, 90vw)', display: 'grid', gap: 10,
+            borderColor: '#ff4f6d', textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: 15, color: '#ff4f6d', fontWeight: 700, letterSpacing: '.2em' }}>
+            QUARANTINE CELL // CONTAINMENT LOCKED
+          </div>
+          <p style={{ fontSize: 11, color: '#cfc6e8' }}>
+            Held by SysWatch under the Data-Aqueduct. Bounty: {g.bounty} Cycles. Serve one cycle to wipe your ledger cleanly, or bypass the laser grid right now.
+          </p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              className="clickable btn"
+              style={{ borderColor: '#4dffa0', color: '#4dffa0', fontSize: 11, padding: '8px 14px' }}
+              onClick={() => g.serveJailSentence()}
+            >
+              SERVE 1 CYCLE (CLEAR BOUNTY)
+            </button>
+            <button
+              className="clickable btn"
+              style={{ borderColor: '#ff4f6d', color: '#ff4f6d', fontSize: 11, padding: '8px 14px' }}
+              onClick={() => g.breakOutOfJail()}
+            >
+              HACK LOCK & BREAK OUT! (+25 BOUNTY)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {g.arrestPrompt && (
+        <div className="panel clickable">
+          <div className="ps1-box" style={{ display: 'grid', gap: 14, width: 'min(480px, 92vw)', borderColor: '#ff3b5c', justifyItems: 'center' }}>
+            <h1 style={{ color: '#ff3b5c', fontSize: 24, letterSpacing: '.24em' }}>SYSWATCH INTERCEPT</h1>
+            <p style={{ color: '#e9e6ff' }}>
+              Officer <span style={{ color: '#ff4f6d' }}>{g.arrestPrompt.officerName}</span> halts your runtime!
+            </p>
+            <div style={{ fontSize: 13, color: '#ffc95c', letterSpacing: '.14em' }}>
+              CURRENT BOUNTY: {g.arrestPrompt.bounty} CYCLES (YOU: {g.denarii})
+            </div>
+            <div style={{ display: 'grid', gap: 8, width: '100%' }}>
+              <button
+                className="clickable btn"
+                disabled={g.denarii < g.arrestPrompt.bounty}
+                style={{
+                  width: '100%', opacity: g.denarii < g.arrestPrompt.bounty ? 0.45 : 1,
+                  borderColor: '#ffc95c', color: '#ffc95c',
+                }}
+                onClick={() => g.payBounty()}
+              >
+                PAY FINE ({g.arrestPrompt.bounty} CYCLES)
+              </button>
+              <button
+                className="clickable btn"
+                style={{ width: '100%', borderColor: '#a78bfa', color: '#a78bfa' }}
+                onClick={() => g.enterJail()}
+              >
+                SUBMIT TO QUARANTINE CELL
+              </button>
+              <button
+                className="clickable btn"
+                style={{ width: '100%', borderColor: '#ff4f6d', color: '#ff4f6d' }}
+                onClick={() => g.closeArrestPrompt()}
+              >
+                RESIST ARREST! (FIGHT SYSWATCH)
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>
@@ -179,17 +341,17 @@ function LockerDrawer() {
   const weaponDef = itemById(WEAPONS, g.loadout.weaponId);
 
   const slotGroups: { slot: GearSlot; label: string; items: { id: string; name: string; desc: string }[] }[] = [
-    { slot: 'weapon', label: 'MAIN WEAPON (DRIVES MOVESET)', items: WEAPONS },
+    { slot: 'weapon', label: 'MAIN WEAPON (SETS MOVESET)', items: WEAPONS },
     { slot: 'offhand', label: weaponDef.twoHanded ? 'OFF-HAND (STORED WHILE WIELDING 2H)' : 'OFF-HAND / SHIELD / NET', items: OFFHANDS },
-    { slot: 'helm', label: 'HELM', items: HELMS },
-    { slot: 'body', label: 'BODY ARMOR', items: BODIES },
-    { slot: 'cape', label: 'CLOAK / CAPE', items: CAPES },
+    { slot: 'helm', label: 'HEADER / VISOR', items: HELMS },
+    { slot: 'body', label: 'SHELL ARMOR', items: BODIES },
+    { slot: 'cape', label: 'DATA STREAMER / CAPE', items: CAPES },
   ];
 
   return (
     <div className="ps1-box ps1-armory-drawer clickable">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #c99b4355', paddingBottom: 8 }}>
-        <h2 className="ps1-heading" style={{ color: '#ffc95c', fontSize: 19, letterSpacing: '.22em' }}>GEAR LOCKER</h2>
+        <h2 className="ps1-heading" style={{ color: '#ffc95c', fontSize: 19, letterSpacing: '.22em' }}>MEMORY LOCKER</h2>
         <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.openPanel(null)}>CLOSE</button>
       </div>
 
@@ -204,7 +366,7 @@ function LockerDrawer() {
           }}
           onClick={() => setTab('gear')}
         >
-          EQUIPMENT
+          LOADOUT
         </button>
         <button
           className="clickable btn"
@@ -216,7 +378,7 @@ function LockerDrawer() {
           }}
           onClick={() => setTab('stats')}
         >
-          ATTRIBUTES {g.statPoints > 0 ? `(+${g.statPoints})` : ''}
+          SYS SPECS {g.statPoints > 0 ? `(+${g.statPoints})` : ''}
         </button>
       </div>
 
@@ -226,7 +388,7 @@ function LockerDrawer() {
             <div style={{ color: gear.color, fontSize: 12, fontWeight: 700 }}>{gear.name}</div>
             <div style={{ color: '#ffc95c' }}>Light: {gear.moves.light.name} · Heavy: {gear.moves.heavy.name}</div>
             <div style={{ color: '#cfc6e8' }}>
-              Armor HP: H{gear.armor.helm} / B{gear.armor.pauldron} / S{gear.armor.shield} · Speed {Math.round(gear.speedMul * 100)}% · Fame ×{gear.fameMul.toFixed(2)}
+              Shell HP: H{gear.armor.helm} / B{gear.armor.pauldron} / S{gear.armor.shield} · Speed {Math.round(gear.speedMul * 100)}% · Signal ×{gear.fameMul.toFixed(2)}
             </div>
           </div>
 
@@ -267,7 +429,7 @@ function LockerDrawer() {
           })}
 
           <div style={{ display: 'grid', gap: 5 }}>
-            <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.14em' }}>CREST COLOR</div>
+            <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.14em' }}>NEON SHELL TINT</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {LOOKS.filter((l) => g.unlocks.includes(l.id)).map((l) => (
                 <button
@@ -288,7 +450,7 @@ function LockerDrawer() {
       ) : (
         <div style={{ display: 'grid', gap: 9 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#4dffa0' }}>
-            <span>UNSPENT POINTS: {g.statPoints}</span>
+            <span>UNSPENT SPECS: {g.statPoints}</span>
             <span style={{ color: '#a99dc4' }}>LVL {g.level} ({g.xp}/{xpForNextLevel(g.level)} XP)</span>
           </div>
           {STAT_KEYS.map((k) => {
@@ -332,17 +494,17 @@ function LockerDrawer() {
 
 function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
   const g = useGame();
-  const title = kind === 'smith' ? 'BLACKSMITH' : 'ARMORER';
-  const sections: { slot: GearSlot; label: string; items: { id: string; name: string; desc: string; cost: number; reqFame: number; color?: string; twoHanded?: boolean; netHeavy?: boolean; hasShield?: boolean }[] }[] =
+  const title = kind === 'smith' ? 'COMPILER FORGE' : 'SHELL CLINIC';
+  const sections: { slot: GearSlot; label: string; items: { id: string; name: string; desc: string; cost: number; reqFame: number; color?: string; twoHanded?: boolean; netHeavy?: boolean }[] }[] =
     kind === 'smith'
       ? [
-          { slot: 'weapon', label: 'WEAPONS (SETS YOUR MOVESET)', items: WEAPONS },
-          { slot: 'offhand', label: 'SHIELDS & ENERGY NETS', items: OFFHANDS.filter((o) => o.id !== 'none') },
+          { slot: 'weapon', label: 'HARD-LIGHT WEAPONS (SETS MOVESET)', items: WEAPONS },
+          { slot: 'offhand', label: 'HOLO-SHIELDS & TRAP NETS', items: OFFHANDS.filter((o) => o.id !== 'none') },
         ]
       : [
-          { slot: 'helm', label: 'HELMS', items: HELMS.filter((h) => h.id !== 'none') },
-          { slot: 'body', label: 'BODY ARMOR', items: BODIES },
-          { slot: 'cape', label: 'CAPES & MANTLES', items: CAPES.filter((c) => c.id !== 'none') },
+          { slot: 'helm', label: 'HEADERS / VISORS', items: HELMS.filter((h) => h.id !== 'none') },
+          { slot: 'body', label: 'SHELL ARMOR', items: BODIES },
+          { slot: 'cape', label: 'STREAMERS & MANTLES', items: CAPES.filter((c) => c.id !== 'none') },
         ];
 
   return (
@@ -350,7 +512,7 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #c99b4355', paddingBottom: 8 }}>
         <div>
           <h2 className="ps1-heading" style={{ color: kind === 'smith' ? '#ff8a3d' : '#3ff0ff', fontSize: 19, letterSpacing: '.22em' }}>{title}</h2>
-          <div style={{ fontSize: 11, color: '#ffc95c', marginTop: 2 }}>{g.denarii} DENARII · {g.fame} FAME</div>
+          <div style={{ fontSize: 11, color: '#ffc95c', marginTop: 2 }}>{g.denarii} CYCLES · {g.fame} SIGNAL</div>
         </div>
         <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.openPanel(null)}>CLOSE</button>
       </div>
@@ -364,19 +526,19 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
             {items.map((it) => {
               const owned = ownedIds.includes(it.id);
               const eq = curId === it.id;
-              const lockedFame = !owned && g.fame < it.reqFame;
-              const cantAfford = !owned && !lockedFame && g.denarii < it.cost;
+              const lockedSignal = !owned && g.fame < it.reqFame;
+              const cantAfford = !owned && !lockedSignal && g.denarii < it.cost;
               const col = it.color ?? '#ffc95c';
               return (
                 <button
                   key={it.id}
                   className="clickable btn"
-                  disabled={lockedFame || cantAfford}
+                  disabled={lockedSignal || cantAfford}
                   style={{
                     width: '100%', textAlign: 'left', padding: '7px 10px', display: 'grid', gap: 3, letterSpacing: '.05em',
                     borderColor: eq ? '#4dffa0' : owned ? '#3ff0ff' : col,
-                    color: eq ? '#4dffa0' : lockedFame || cantAfford ? '#8c81a8' : '#e9e6ff',
-                    opacity: lockedFame ? 0.52 : cantAfford ? 0.72 : 1,
+                    color: eq ? '#4dffa0' : lockedSignal || cantAfford ? '#8c81a8' : '#e9e6ff',
+                    opacity: lockedSignal ? 0.52 : cantAfford ? 0.72 : 1,
                     background: eq ? '#162420' : '#0b0816',
                   }}
                   onClick={() => g.buyAndEquipItem(slot, it.id)}
@@ -386,7 +548,7 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
                       {eq ? '▶ ' : ''}{it.name}{it.twoHanded ? ' [2H]' : it.netHeavy ? ' [NET]' : ''}
                     </span>
                     <span style={{ fontSize: 10 }}>
-                      {eq ? 'EQUIPPED' : owned ? 'OWNED · EQUIP' : lockedFame ? `REQ ${it.reqFame} FAME` : `${it.cost}D · BUY`}
+                      {eq ? 'EQUIPPED' : owned ? 'OWNED · EQUIP' : lockedSignal ? `REQ ${it.reqFame} SIG` : `${it.cost}C · BUY`}
                     </span>
                   </div>
                   <div style={{ fontSize: 9, color: '#cfc6e8' }}>{it.desc}</div>
@@ -419,8 +581,8 @@ function StationPanel() {
     apothecary: (
       <>
         <div style={{ display: 'flex', gap: 18, fontSize: 12, color: '#ffc95c' }}>
-          <span>{g.denarii} DENARII</span>
-          <span style={{ color: '#4dffa0' }}>FLASKS: {g.flasks}/{MAX_FLASKS}</span>
+          <span>{g.denarii} CYCLES</span>
+          <span style={{ color: '#4dffa0' }}>RESTORES: {g.flasks}/{MAX_FLASKS}</span>
         </div>
         <div style={{ display: 'grid', gap: 8, width: '100%' }}>
           {CONSUMABLES.map((c) => {
@@ -442,14 +604,14 @@ function StationPanel() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
                   <span style={{ color: c.color }}>{c.name}</span>
-                  <span>{active ? 'ACTIVE TODAY' : full ? 'BELT FULL' : `${c.cost} DENARII`}</span>
+                  <span>{active ? 'ACTIVE CYCLE' : full ? 'SLOT FULL' : `${c.cost} CYCLES`}</span>
                 </div>
                 <div style={{ fontSize: 10, color: '#cfc6e8' }}>{c.desc}</div>
               </button>
             );
           })}
         </div>
-        <p style={{ fontSize: 11 }}>Daily food & oils last until you sleep in the Ludus Bunk.</p>
+        <p style={{ fontSize: 11 }}>Cycle stimms & rations persist until you Defrag in the Safe Sector Pod.</p>
       </>
     ),
 
@@ -457,7 +619,7 @@ function StationPanel() {
       <div style={{ display: 'grid', gap: 12, width: '100%' }}>
         <div style={{ display: 'grid', gap: 6 }}>
           <div style={{ fontSize: 11, color: '#ffc95c', letterSpacing: '.16em' }}>
-            ACTIVE CONTRACTS ({g.activeQuests.length}/3)
+            ACTIVE SYS CONTRACTS ({g.activeQuests.length}/3)
           </div>
           {g.activeQuests.length === 0 ? (
             <p>No active contracts. Accept up to 3 below.</p>
@@ -477,7 +639,7 @@ function StationPanel() {
                       {q.title} ({q.progress}/{q.target})
                     </div>
                     <div style={{ fontSize: 10, color: '#cfc6e8' }}>{q.desc}</div>
-                    <div style={{ fontSize: 10, color: '#3ff0ff' }}>Reward: {q.denarii}D · {q.xp} XP · {q.fame} Fame</div>
+                    <div style={{ fontSize: 10, color: '#3ff0ff' }}>Reward: {q.denarii}C · {q.xp} XP · {q.fame} Signal</div>
                   </div>
                   {ready && (
                     <button
@@ -496,7 +658,7 @@ function StationPanel() {
 
         <div style={{ display: 'grid', gap: 6 }}>
           <div style={{ fontSize: 11, color: '#ffc95c', letterSpacing: '.16em' }}>
-            DAY {g.day} POSTED BOUNTIES
+            CYCLE {g.day} SYSTEM BOUNTIES
           </div>
           {dailyQuests.map((q) => {
             const accepted = g.activeQuests.some((x) => x.id === q.id);
@@ -513,7 +675,7 @@ function StationPanel() {
                 <div style={{ textAlign: 'left', display: 'grid', gap: 2 }}>
                   <div style={{ fontSize: 12, color: '#e9e6ff' }}>{q.title}</div>
                   <div style={{ fontSize: 10, color: '#cfc6e8' }}>{q.desc}</div>
-                  <div style={{ fontSize: 10, color: '#ffc95c' }}>Reward: {q.denarii}D · {q.xp} XP · {q.fame} Fame</div>
+                  <div style={{ fontSize: 10, color: '#ffc95c' }}>Reward: {q.denarii}C · {q.xp} XP · {q.fame} Signal</div>
                 </div>
                 <button
                   className="clickable btn"
@@ -532,33 +694,33 @@ function StationPanel() {
 
     bunk: (
       <>
-        <p style={{ color: g.timeOfDay === 'morning' ? '#ffe57f' : '#ff9d5c' }}>
-          DAY {g.day} · {g.timeOfDay.toUpperCase()}
+        <p style={{ color: g.timeOfDay === 'morning' ? '#3ff0ff' : '#ff4fd8' }}>
+          CYCLE {g.day} · {g.timeOfDay === 'morning' ? 'BOOT CYCLE' : 'PURGE DUSK'}
         </p>
-        <p>Sleep in your Ludus cot to restore strength for Day {g.day + 1} Morning. Fresh Fight Cards and Contracts post at dawn; daily meals & blade oils expire.</p>
+        <p>Run a memory Defrag inside your Safe Sector Pod to restore full runtime for Cycle {g.day + 1}. Fresh Purge Cards and System Bounties rotate at boot.</p>
         <button
           className="clickable btn"
           style={{ borderColor: '#a78bfa', color: '#e9e6ff' }}
           onClick={() => { g.sleepNextDay(); g.openPanel(null); }}
         >
-          SLEEP UNTIL DAY {g.day + 1} MORNING
+          DEFRAG TO CYCLE {g.day + 1}
         </button>
       </>
     ),
 
     yard: (
       <div style={{ display: 'grid', gap: 12, width: '100%' }}>
-        <p>Heavy timber pel-posts and straw dummies stand under the afternoon sun.</p>
+        <p>Synthetic holo-targets humming beside the simulation racks.</p>
         <button
           className="clickable btn"
           disabled={g.trainedToday}
           style={{ opacity: g.trainedToday ? 0.5 : 1, borderColor: '#ff6b6b', color: '#ffc95c' }}
           onClick={() => g.drillTraining()}
         >
-          {g.trainedToday ? 'DAILY DRILL COMPLETED — REST IN BUNK' : 'RUN DAILY COMBAT DRILL (+35 XP)'}
+          {g.trainedToday ? 'SIM DRILL COMPLETED THIS CYCLE' : 'RUN COMBAT BENCHMARK (+35 XP)'}
         </button>
         <div style={{ fontSize: 11, color: '#4dffa0', letterSpacing: '.14em' }}>
-          QUICK STAT UPGRADES · UNSPENT POINTS: {g.statPoints}
+          QUICK SPEC UPGRADES · UNSPENT: {g.statPoints}
         </div>
         <div style={{ display: 'grid', gap: 5 }}>
           {STAT_KEYS.map((k) => {
@@ -591,14 +753,14 @@ function StationPanel() {
     wall: (
       <div style={{ display: 'grid', gap: 10, width: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-around', fontSize: 12, color: '#ffc95c' }}>
-          <span>RECORD: {g.wins}W - {g.losses}L</span>
-          <span style={{ color: rank.color }}>{rank.name} ({g.fame} FAME)</span>
-          <span>TITLES: {g.champions}</span>
+          <span>W/L: {g.wins}-{g.losses}</span>
+          <span style={{ color: rank.color }}>{rank.name} ({g.fame} SIG)</span>
+          <span>ROOT CLEARS: {g.champions}</span>
         </div>
         {nextRank && (
-          <p style={{ fontSize: 11 }}>Next Rank: {nextRank.name} at {nextRank.min} Fame</p>
+          <p style={{ fontSize: 11 }}>Next Tier: {nextRank.name} at {nextRank.min} Signal</p>
         )}
-        <div style={{ fontSize: 11, color: '#ffc95c', letterSpacing: '.14em' }}>CREST HONOR COLORS</div>
+        <div style={{ fontSize: 11, color: '#ffc95c', letterSpacing: '.14em' }}>NEON SHELL TINTS</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
           {LOOKS.map((l) => {
             const unlocked = g.unlocks.includes(l.id);
@@ -615,17 +777,17 @@ function StationPanel() {
                 }}
                 onClick={() => (unlocked ? g.equipLook(l.id) : g.buyLook(l.id))}
               >
-                {eq ? '▶ ' : ''}{l.name}{!unlocked ? ` · ${l.cost}D` : ''}
+                {eq ? '▶ ' : ''}{l.name}{!unlocked ? ` · ${l.cost}C` : ''}
               </button>
             );
           })}
         </div>
-        <div style={{ fontSize: 11, color: '#a99dc4', letterSpacing: '.12em', marginTop: 4 }}>CAREER LEDGER</div>
+        <div style={{ fontSize: 11, color: '#a99dc4', letterSpacing: '.12em', marginTop: 4 }}>DELETION LOG</div>
         {g.fallen.length === 0 ? (
-          <p>No defeats recorded. Your marble plaque remains unblemished.</p>
+          <p>Zero de-rezzes recorded on your address block.</p>
         ) : (
           [...g.fallen].reverse().slice(0, 5).map((f, i) => (
-            <p key={i} style={{ fontSize: 11 }}>{f.name} — Tier {f.bouts}, {f.cause} ({f.date})</p>
+            <p key={i} style={{ fontSize: 11 }}>{f.name} — {f.cause} ({f.date})</p>
           ))
         )}
       </div>
@@ -634,7 +796,7 @@ function StationPanel() {
     gate: (
       <div style={{ display: 'grid', gap: 10, width: '100%' }}>
         <div style={{ fontSize: 11, color: gear.color }}>
-          EQUIPPED: {gear.name} · HEAVY: {gear.moves.heavy.name} · FLASKS: {g.flasks}/{MAX_FLASKS}
+          ACTIVE: {gear.name} · HEAVY: {gear.moves.heavy.name} · RESTORES: {g.flasks}/{MAX_FLASKS}
         </div>
         <div style={{ display: 'grid', gap: 8 }}>
           {fightCards.map((card) => {
@@ -655,7 +817,7 @@ function StationPanel() {
                   </div>
                   <div style={{ fontSize: 10, color: '#e9e6ff' }}>{card.subtitle}</div>
                   <div style={{ fontSize: 10, color: '#4dffa0' }}>
-                    {locked ? `Requires ${card.reqFame} Fame (You: ${g.fame})` : `Payout: ${card.denarii}D · ${card.xp} XP · ${card.fame} Fame`}
+                    {locked ? `Requires ${card.reqFame} Signal (You: ${g.fame})` : `Payout: ${card.denarii}C · ${card.xp} XP · ${card.fame} Signal`}
                   </div>
                 </div>
                 <button
@@ -667,7 +829,7 @@ function StationPanel() {
                     g.startCardBout(card);
                   }}
                 >
-                  ENTER THE SAND
+                  ENTER THE GRID
                 </button>
               </div>
             );
@@ -717,8 +879,8 @@ function Draft() {
   return (
     <div className="panel clickable">
       <div className="ps1-box" style={{ display: 'grid', gap: 14, justifyItems: 'center' }}>
-        <h1>FATE</h1>
-        <p>Bout {a.bout} won. +{a.earned} glory. Take one. The others are gone.</p>
+        <h1>OVERCLOCK</h1>
+        <p>Bout {a.bout} cleared. +{a.earned} Signal. Pick one thread.</p>
         <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
           {a.draft.map((id, i) => {
             const b = boonById(id)!;
@@ -855,7 +1017,7 @@ function ArenaHud() {
               background: '#0d0919cc',
             }}
           >
-            [H] FLASK ×{flasks}
+            [H] RESTORE ×{flasks}
           </div>
           {dailyBuffs.map((b) => (
             <div
@@ -865,7 +1027,7 @@ function ArenaHud() {
                 color: '#ffc95c', background: '#0d0919cc',
               }}
             >
-              {b === 'honey_bread' ? '+25 HP' : b === 'iron_wine' ? '+25% STAM' : '+15% DMG'}
+              {b === 'honey_bread' ? '+25 HP' : b === 'iron_wine' ? '+25% BW' : '+15% DMG'}
             </div>
           ))}
         </div>
@@ -895,7 +1057,7 @@ function ArenaHud() {
         <div className="panel" style={{ background: 'transparent' }}>
           <div className="ps1-box" style={{ padding: '16px 36px' }}>
             <h1>{selectedCard ? selectedCard.title : `BOUT ${a.bout}`}</h1>
-            <p style={{ marginTop: 6, color: '#e9e6ff' }}>ENTER THE SAND</p>
+            <p style={{ marginTop: 6, color: '#e9e6ff' }}>ENTER THE PURGE GRID</p>
           </div>
         </div>
       )}
@@ -904,35 +1066,35 @@ function ArenaHud() {
         <div className="panel clickable">
           <div className="ps1-box" style={{ display: 'grid', gap: 12, justifyItems: 'center', minWidth: 380 }}>
             <h1 style={a.phase === 'defeat' ? { color: '#ff4f6d', textShadow: '2px 2px 0 #05030a, 0 0 20px #ff4f6d88' } : undefined}>
-              {a.phase === 'champion' ? 'CHAMPION OF THE COLOSSEUM' : a.phase === 'victory' ? 'VICTORY IN THE SAND' : 'DEFEATED IN THE SAND'}
+              {a.phase === 'champion' ? 'ROOT ACCESS SECURED' : a.phase === 'victory' ? 'PROCESS RETAINED' : 'DE-REZZED ON THE GRID'}
             </h1>
             {lastResult ? (
               <div style={{ display: 'grid', gap: 6, width: '100%', fontSize: 12, color: '#e9e6ff' }}>
                 <div style={{ color: lastResult.denariiDelta >= 0 ? '#ffc95c' : '#ff6b6b' }}>
-                  {lastResult.denariiDelta >= 0 ? `+${lastResult.denariiDelta} DENARII EARNED` : `${lastResult.denariiDelta} DENARII (HEALER FEE)`}
+                  {lastResult.denariiDelta >= 0 ? `+${lastResult.denariiDelta} CYCLES SIPHONED` : `${lastResult.denariiDelta} CYCLES (RECOVERY TAX)`}
                 </div>
-                <div style={{ color: '#3ff0ff' }}>+{lastResult.xpEarned} XP EARNED</div>
+                <div style={{ color: '#3ff0ff' }}>+{lastResult.xpEarned} XP COMPILED</div>
                 {lastResult.levelsGained > 0 && (
                   <div style={{ color: '#4dffa0', fontWeight: 700, fontSize: 14, letterSpacing: '.12em' }}>
-                    LEVEL UP! +{lastResult.levelsGained * 3} STAT POINTS EARNED [PRESS C IN TOWN]
+                    BUILD UPGRADED! +{lastResult.levelsGained * 3} SPEC POINTS [PRESS C IN CITY]
                   </div>
                 )}
                 <div style={{ color: lastResult.fameDelta >= 0 ? '#a78bfa' : '#ff6b6b' }}>
-                  FAME {lastResult.fameDelta >= 0 ? `+${lastResult.fameDelta}` : lastResult.fameDelta}
+                  SIGNAL {lastResult.fameDelta >= 0 ? `+${lastResult.fameDelta}` : lastResult.fameDelta}
                 </div>
                 {readyQuests > 0 && (
                   <div style={{ color: '#4dffa0' }}>
-                    {readyQuests} Contract{readyQuests > 1 ? 's' : ''} ready to turn in at the Contract Board!
+                    {readyQuests} Contract{readyQuests > 1 ? 's' : ''} ready to claim at the Bounty Terminal!
                   </div>
                 )}
                 {!lastResult.victory && (
-                  <p style={{ marginTop: 4 }}>Carried back to the Ludus Barracks. You keep all stats and gear.</p>
+                  <p style={{ marginTop: 4 }}>Rebooted inside your Safe Sector Pod. All specs and hard-light gear preserved.</p>
                 )}
               </div>
             ) : (
-              <p>{a.phase === 'champion' ? `+${a.earned} GLORY. Your name is sung in the stands.` : `Bout ${a.bout} of ${LADDER.length}.`}</p>
+              <p>{a.phase === 'champion' ? `+${a.earned} SIGNAL. Your address remains allocated.` : `Bout ${a.bout} of ${LADDER.length}.`}</p>
             )}
-            <button className="clickable btn" onClick={leave}>RETURN TO TOWN</button>
+            <button className="clickable btn" onClick={leave}>RETURN TO SECTOR</button>
           </div>
         </div>
       )}
@@ -943,7 +1105,7 @@ function ArenaHud() {
         <KeyCap k="F" label="Bash" />
         <KeyCap k="SHIFT" label="Parry/Block" />
         <KeyCap k="SPACE" label="Dodge" />
-        <KeyCap k="H" label="Flask" />
+        <KeyCap k="H" label="Restore" />
         <KeyCap k="TAB" label="Lock" />
         <KeyCap k="P" label="CRT" />
       </div>
@@ -955,20 +1117,27 @@ export function HUD() {
   const near = useGame((s) => s.near);
   const panel = useGame((s) => s.panel);
   const scene = useGame((s) => s.scene);
+  const arrestPrompt = useGame((s) => s.arrestPrompt);
+  const inJail = useGame((s) => s.inJail);
   const station = STATIONS.find((s) => s.id === near);
   return (
     <div className="hud">
-      <div className="title">BONEYARD · {scene === 'ludus' ? 'ROMAN FORUM' : 'COLOSSEUM'}</div>
+      <div className="title">BONEYARD · {scene === 'ludus' ? 'SECTOR /DEV/NULL' : 'PURGE GRID'}</div>
       <TopRightControls />
       <TownStatusStrip />
-      {station && !panel && <div className="hint" style={{ borderColor: station.color, color: station.color }}>[ENTER] {station.verb}</div>}
+      <StreetOverlays />
+      {station && !panel && !arrestPrompt && !inJail && (
+        <div className="hint" style={{ borderColor: station.color, color: station.color }}>[ENTER] {station.verb}</div>
+      )}
       {scene === 'ludus' && (
         <div className="controls">
           <KeyCap k="WASD" label="Move" />
-          <KeyCap k="Q/E" label="Orbit" />
-          <KeyCap k="R/F" label="Tilt" />
-          <KeyCap k="ENTER" label="Use" />
-          <KeyCap k="C" label="Gear & Stats" />
+          <KeyCap k="T" label="Greet" />
+          <KeyCap k="G" label="Provoke" />
+          <KeyCap k="X" label="Blade" />
+          <KeyCap k="J/K" label="Strike" />
+          <KeyCap k="C" label="Gear/Specs" />
+          <KeyCap k="ENTER" label="Terminal" />
           <KeyCap k="P" label="CRT" />
         </div>
       )}

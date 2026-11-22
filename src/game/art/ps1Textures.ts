@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchCurvedMaterial } from './curvature';
 
 export type Ps1TexKind =
   | 'sand'
@@ -12,7 +13,11 @@ export type Ps1TexKind =
   | 'rune'
   | 'roof'
   | 'plaster'
-  | 'cobble';
+  | 'cobble'
+  | 'grid'
+  | 'circuit'
+  | 'conduit'
+  | 'holo';
 
 const BAYER4 = [
   0, 8, 2, 10,
@@ -235,6 +240,64 @@ function createTexture(kind: Ps1TexKind): THREE.CanvasTexture | null {
           return bayerPick(x, y, 0.3 + shade * 0.4 + hash2(x, y, 19) * 0.2) ? [98, 84, 96] : [76, 64, 78];
         });
       });
+
+    case 'grid':
+      return buildCanvas(64, 64, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          const major = x < 2 || y < 2;
+          if (major) return [54, 226, 248];
+          const sub = x % 32 === 0 || y % 32 === 0;
+          if (sub) return [28, 104, 152];
+          const pulse = (x === 16 && y % 8 < 3) || (y === 16 && x % 8 < 3);
+          if (pulse && hash2(x >> 2, y >> 2, 709) > 0.45) return [42, 138, 178];
+          const grit = hash2(x, y, 313);
+          return bayerPick(x, y, 0.25 + grit * 0.35) ? [14, 14, 30] : [8, 8, 20];
+        });
+      });
+
+    case 'circuit':
+      return buildCanvas(64, 64, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          const traceX = x % 16;
+          const traceY = y % 16;
+          const slotSeed = hash2(Math.floor(x / 8), Math.floor(y / 6), 443);
+          const litWin = traceY >= 2 && traceY <= 4 && traceX >= 3 && traceX <= 6 && slotSeed > 0.56;
+          if (litWin) {
+            if (slotSeed > 0.86) return [248, 82, 212];
+            if (slotSeed > 0.72) return [250, 198, 84];
+            return [62, 234, 248];
+          }
+          const busLine = traceX === 0 || (traceY === 0 && hash2(Math.floor(x / 16), Math.floor(y / 16), 211) > 0.5);
+          if (busLine) return [28, 78, 118];
+          return bayerPick(x, y, 0.3 + hash2(x, y, 97) * 0.3) ? [18, 18, 36] : [10, 10, 24];
+        });
+      });
+
+    case 'conduit':
+      return buildCanvas(64, 64, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          if (y === 6 || y === 7 || y === h - 7 || y === h - 8) return [56, 232, 248];
+          if (x % 32 === 0 && y > 8 && y < h - 8) return [40, 168, 204];
+          const seam = y % 16 === 0 || (x + (Math.floor(y / 16) % 2) * 16) % 32 === 0;
+          if (seam) return [12, 16, 32];
+          return bayerPick(x, y, 0.35 + hash2(x, y, 509) * 0.35) ? [30, 34, 56] : [20, 22, 40];
+        });
+      });
+
+    case 'holo':
+      return buildCanvas(64, 32, (ctx, w, h) => {
+        fillDither(ctx, w, h, (x, y) => {
+          const border = x < 2 || x >= w - 2 || y < 2 || y >= h - 2;
+          if (border) return [64, 238, 250];
+          const scan = y % 2 === 0;
+          const bar = y >= 7 && y <= 23 && x >= 6 && x <= w - 7;
+          if (bar) {
+            const cell = hash2(Math.floor(x / 4), Math.floor(y / 4), 881);
+            if (cell > 0.52) return scan ? [248, 78, 212] : [250, 200, 92];
+          }
+          return scan ? [22, 14, 42] : [14, 10, 28];
+        });
+      });
   }
 }
 
@@ -265,8 +328,9 @@ export function makePs1Material(opts: {
   side?: THREE.Side;
   transparent?: boolean;
   opacity?: number;
+  curved?: boolean;
 }): THREE.MeshLambertMaterial {
-  return new THREE.MeshLambertMaterial({
+  const mat = new THREE.MeshLambertMaterial({
     color: opts.color,
     map: opts.map ?? null,
     emissive: opts.emissive ?? 0x000000,
@@ -277,4 +341,6 @@ export function makePs1Material(opts: {
     flatShading: true,
     dithering: true,
   });
+  if (opts.curved !== false) patchCurvedMaterial(mat);
+  return mat;
 }

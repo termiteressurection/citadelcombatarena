@@ -51,6 +51,7 @@ export function StaticBatch({ children }: { children: ReactNode }) {
       if (!geo) { merged.forEach((m) => m.geometry.dispose()); return; }
       const mesh = new THREE.Mesh(geo, material);
       mesh.renderOrder = 1;
+      mesh.frustumCulled = false;
       merged.push(mesh);
     }
     for (const m of merged) src.parent!.add(m);

@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Atk } from './combat';
 import { moveOf, type MoveMotion, type StyleId } from './styles';
+import { makeCurvedBasicMaterial } from '../art/curvature';
 
 interface Shard { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number; color: THREE.Color }
 
@@ -118,7 +119,7 @@ export function SlashRibbons({ pool }: { pool: SlashPool }) {
     const l = new THREE.ConeGeometry(0.24, 2.8, 5);
     l.translate(0, 1.4, 0);
     l.rotateX(Math.PI / 2);
-    const ms = Array.from({ length: SlashPool.CAP }, () => new THREE.MeshBasicMaterial({
+    const ms = Array.from({ length: SlashPool.CAP }, () => makeCurvedBasicMaterial({
       color: '#ffffff', transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
     }));
@@ -255,7 +256,7 @@ export function DashGhosts({ pool }: { pool: GhostPool }) {
     headGeo: new THREE.BoxGeometry(0.075, 0.2, 0.075),
     torsoGeo: new THREE.BoxGeometry(0.1, 0.56, 0.1),
     limbGeo: new THREE.BoxGeometry(0.08, 0.72, 0.08),
-    mats: Array.from({ length: GhostPool.CAP }, () => new THREE.MeshBasicMaterial({
+    mats: Array.from({ length: GhostPool.CAP }, () => makeCurvedBasicMaterial({
       color: '#3ff0ff', transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false,
     })),

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import type { Atk, LimbKey, State } from './arena/combat';
 import { moveOf, type ArmorKey, type MoveMotion, type StyleId } from './arena/styles';
 import { gearFromStyle, type GearVisuals } from './rpg/items';
+import { makeCurvedBasicMaterial } from './art/curvature';
 import { getPs1Texture, makePs1Material } from './art/ps1Textures';
 
 export type LimbPose = Record<LimbKey, { ratio: number; severed: boolean }>;
@@ -48,7 +49,7 @@ const smooth = (cur: number, target: number, rate: number, dt: number) =>
 
 const CIVILIAN_VISUALS: GearVisuals = { weapon: 'gladius', offhand: 'none', helm: 'none', body: 'tunic', cape: 'scarf' };
 
-/** Articulated low-poly PS1 triangle & polygon gladiator (or unarmed town citizen) driven by modular RPG gear. */
+/** Articulated low-poly PS1 triangle & polygon TRON deleted-file fighter driven by modular hard-light gear. */
 export const Gladiator = forwardRef<GladiatorHandle, {
   color: string;
   accent?: string;
@@ -56,8 +57,10 @@ export const Gladiator = forwardRef<GladiatorHandle, {
   style?: StyleId;
   gear?: GearVisuals;
   civilian?: boolean;
+  sheathed?: boolean;
 }>(
-  function Gladiator({ color, accent = '#ffc95c', scale = 1, style = 'murmillo', gear, civilian = false }, ref) {
+  function Gladiator({ color, accent = '#ffc95c', scale = 1, style = 'murmillo', gear, civilian = false, sheathed = false }, ref) {
+    const armed = !civilian && !sheathed;
     const v = civilian ? CIVILIAN_VISUALS : (gear ?? gearFromStyle(style).visuals);
     const group = useRef<THREE.Group>(null!);
     const root = useRef<THREE.Group>(null!);
@@ -83,10 +86,10 @@ export const Gladiator = forwardRef<GladiatorHandle, {
     });
 
     const colors = useMemo(() => ({
-      base: new THREE.Color(color).lerp(new THREE.Color('#ece6f7'), 0.68),
+      base: new THREE.Color(color).lerp(new THREE.Color('#282442'), 0.58),
       gear: new THREE.Color(color),
       trim: new THREE.Color(accent),
-      metal: new THREE.Color('#d2d8e8'),
+      metal: new THREE.Color('#8e9ab8'),
       amber: new THREE.Color('#ffae33'),
       crimson: new THREE.Color('#ff2e4c'),
       warn: new THREE.Color('#ff4433'),
@@ -100,24 +103,25 @@ export const Gladiator = forwardRef<GladiatorHandle, {
       const woodTex = getPs1Texture('wood');
       const bannerTex = getPs1Texture('banner');
       return {
-        head: makePs1Material({ color: colors.base, map: tunicTex }),
-        torso: makePs1Material({ color: colors.base, map: tunicTex }),
-        armL: makePs1Material({ color: colors.base, map: tunicTex }),
-        armR: makePs1Material({ color: colors.base, map: tunicTex }),
-        legL: makePs1Material({ color: colors.base, map: tunicTex }),
-        legR: makePs1Material({ color: colors.base, map: tunicTex }),
-        leather: makePs1Material({ color: '#7a5238', map: woodTex }),
-        bronze: makePs1Material({ color: '#ffcf70', map: bronzeTex }),
-        iron: makePs1Material({ color: colors.metal, map: bronzeTex }),
-        wood: makePs1Material({ color: '#a8784e', map: woodTex }),
-        blade: makePs1Material({ color: '#e8eeff', map: bronzeTex, emissive: '#6e82a8', emissiveIntensity: 0.25 }),
-        gearPaint: makePs1Material({ color: colors.gear, map: bronzeTex }),
-        trim: makePs1Material({ color: colors.trim, map: bronzeTex, emissive: colors.trim, emissiveIntensity: 0.12 }),
-        cape: makePs1Material({ color: '#ffffff', map: bannerTex, side: THREE.DoubleSide }),
-        eye: new THREE.MeshBasicMaterial({ color: colors.gear }),
-        net: new THREE.MeshBasicMaterial({ color: '#3ff0ff', wireframe: true, transparent: true, opacity: 0.72 }),
-        glint: new THREE.MeshBasicMaterial({ color: '#fff5c0' }),
-        shadow: new THREE.MeshBasicMaterial({ color: '#04020a', transparent: true, opacity: 0.62 }),
+        head: makePs1Material({ color: colors.base, map: tunicTex, emissive: '#141226', emissiveIntensity: 0.25 }),
+        torso: makePs1Material({ color: colors.base, map: tunicTex, emissive: '#141226', emissiveIntensity: 0.25 }),
+        armL: makePs1Material({ color: colors.base, map: tunicTex, emissive: '#141226', emissiveIntensity: 0.25 }),
+        armR: makePs1Material({ color: colors.base, map: tunicTex, emissive: '#141226', emissiveIntensity: 0.25 }),
+        legL: makePs1Material({ color: colors.base, map: tunicTex, emissive: '#141226', emissiveIntensity: 0.25 }),
+        legR: makePs1Material({ color: colors.base, map: tunicTex, emissive: '#141226', emissiveIntensity: 0.25 }),
+        leather: makePs1Material({ color: '#2b2442', map: woodTex }),
+        bronze: makePs1Material({ color: '#ffd06b', map: bronzeTex, emissive: '#7a5218', emissiveIntensity: 0.22 }),
+        iron: makePs1Material({ color: colors.metal, map: bronzeTex, emissive: '#1d2238', emissiveIntensity: 0.2 }),
+        wood: makePs1Material({ color: '#383254', map: woodTex }),
+        blade: makePs1Material({ color: '#e8fbff', map: bronzeTex, emissive: colors.gear, emissiveIntensity: 0.55 }),
+        gearPaint: makePs1Material({ color: colors.gear, map: bronzeTex, emissive: colors.gear, emissiveIntensity: 0.28 }),
+        trim: makePs1Material({ color: colors.trim, map: bronzeTex, emissive: colors.trim, emissiveIntensity: 0.3 }),
+        cape: makePs1Material({ color: '#ffffff', map: bannerTex, side: THREE.DoubleSide, emissive: colors.gear, emissiveIntensity: 0.15 }),
+        eye: makeCurvedBasicMaterial({ color: colors.gear }),
+        net: makeCurvedBasicMaterial({ color: '#3ff0ff', wireframe: true, transparent: true, opacity: 0.72 }),
+        glint: makeCurvedBasicMaterial({ color: '#fff5c0' }),
+        shadow: makeCurvedBasicMaterial({ color: '#04020a', transparent: true, opacity: 0.62 }),
+        ring: makeCurvedBasicMaterial({ color: colors.gear, transparent: true, opacity: 0.68 }),
       };
     }, [colors]);
 
@@ -767,7 +771,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                 <mesh position={[0, -0.15, 0]} material={mats.armL}><cylinderGeometry args={[0.062, 0.048, 0.30, 5]} /></mesh>
                 <mesh position={[0, -0.22, 0]} material={mats.bronze}><cylinderGeometry args={[0.068, 0.058, 0.14, 5]} /></mesh>
                 <mesh position={[0, -0.32, 0]} material={mats.leather}><boxGeometry args={[0.08, 0.09, 0.09]} /></mesh>
-                {!civilian && v.offhand === 'scutum' && (
+                {armed && v.offhand === 'scutum' && (
                   <group position={[0.08, -0.22, 0.14]}>
                     <group ref={shieldTrim}>
                       <mesh material={mats.wood}><boxGeometry args={[0.06, 0.84, 0.50]} /></mesh>
@@ -776,7 +780,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                     </group>
                   </group>
                 )}
-                {!civilian && v.offhand === 'buckler' && (
+                {armed && v.offhand === 'buckler' && (
                   <group position={[0.08, -0.26, 0.12]} rotation={[0, 0, Math.PI / 2]}>
                     <group ref={shieldTrim}>
                       <mesh material={mats.bronze}><cylinderGeometry args={[0.31, 0.31, 0.06, 10]} /></mesh>
@@ -785,14 +789,14 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                     </group>
                   </group>
                 )}
-                {!civilian && v.weapon === 'twinSica' && (
+                {armed && v.weapon === 'twinSica' && (
                   <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
                     <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.16, 0.04, 0.06]} /></mesh>
                     <mesh position={[0, -0.36, 0]} material={mats.blade}><boxGeometry args={[0.045, 0.76, 0.065]} /></mesh>
                     <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.blade}><coneGeometry args={[0.05, 0.28, 4]} /></mesh>
                   </group>
                 )}
-                {!civilian && v.offhand === 'net' && v.weapon !== 'twinSica' && (
+                {armed && v.offhand === 'net' && v.weapon !== 'twinSica' && (
                   <mesh position={[0.04, -0.32, 0.08]} material={mats.net}><icosahedronGeometry args={[0.22, 1]} /></mesh>
                 )}
               </group>
@@ -806,21 +810,21 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                 <mesh position={[0, -0.15, 0]} material={mats.armR}><cylinderGeometry args={[0.062, 0.048, 0.30, 5]} /></mesh>
                 <mesh position={[0, -0.22, 0]} material={mats.bronze}><cylinderGeometry args={[0.068, 0.058, 0.14, 5]} /></mesh>
                 <mesh position={[0, -0.32, 0]} material={mats.leather}><boxGeometry args={[0.08, 0.09, 0.09]} /></mesh>
-                {!civilian && v.weapon === 'gladius' && (
+                {armed && v.weapon === 'gladius' && (
                   <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
                     <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.20, 0.045, 0.07]} /></mesh>
                     <mesh position={[0, -0.44, 0]} material={mats.blade}><boxGeometry args={[0.06, 0.72, 0.075]} /></mesh>
                     <mesh position={[0, -0.88, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.065, 0.22, 4]} /></mesh>
                   </group>
                 )}
-                {!civilian && v.weapon === 'twinSica' && (
+                {armed && v.weapon === 'twinSica' && (
                   <group position={[0, -0.32, 0]} rotation={[-0.4, 0, 0]}>
                     <mesh position={[0, -0.05, 0]} material={mats.bronze}><boxGeometry args={[0.16, 0.04, 0.06]} /></mesh>
                     <mesh position={[0, -0.36, 0]} material={mats.blade}><boxGeometry args={[0.045, 0.76, 0.065]} /></mesh>
                     <mesh position={[0, -0.78, 0.05]} rotation={[0.35, 0, 0]} material={mats.blade}><coneGeometry args={[0.05, 0.28, 4]} /></mesh>
                   </group>
                 )}
-                {!civilian && v.weapon === 'warhammer' && (
+                {armed && v.weapon === 'warhammer' && (
                   <group position={[0, -0.32, 0]} rotation={[-0.35, 0, 0]}>
                     <mesh position={[0, -0.58, 0]} material={mats.wood}><cylinderGeometry args={[0.04, 0.04, 1.38, 5]} /></mesh>
                     <mesh position={[0, -1.24, 0]} material={mats.iron}><boxGeometry args={[0.28, 0.24, 0.48]} /></mesh>
@@ -828,7 +832,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                     <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.09, 0.22, 4]} /></mesh>
                   </group>
                 )}
-                {!civilian && v.weapon === 'trident' && (
+                {armed && v.weapon === 'trident' && (
                   <group position={[0, -0.32, 0]} rotation={[-0.45, 0, 0]}>
                     <mesh position={[0, -0.52, 0]} material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.56, 5]} /></mesh>
                     <mesh position={[0, -1.28, 0]} material={mats.bronze}><boxGeometry args={[0.34, 0.06, 0.06]} /></mesh>
@@ -837,7 +841,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
                     ))}
                   </group>
                 )}
-                {!civilian && v.weapon === 'spear' && (
+                {armed && v.weapon === 'spear' && (
                   <group position={[0, -0.32, 0]} rotation={[-0.48, 0, 0]}>
                     <mesh position={[0, -0.50, 0]} material={mats.wood}><cylinderGeometry args={[0.032, 0.032, 1.65, 5]} /></mesh>
                     <mesh position={[0, -1.42, 0]} rotation={[Math.PI, 0, 0]} material={mats.blade}><coneGeometry args={[0.085, 0.30, 4]} /></mesh>
@@ -857,9 +861,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         </group>
 
         {!civilian && (
-          <mesh position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <mesh position={[0, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]} material={mats.ring}>
             <ringGeometry args={[0.48, 0.56, 12]} />
-            <meshBasicMaterial color={color} transparent opacity={0.62} />
           </mesh>
         )}
       </group>

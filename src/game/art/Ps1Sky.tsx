@@ -1,29 +1,33 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { makeCurvedBasicMaterial } from './curvature';
 import { getPs1Texture, makePs1Material } from './ps1Textures';
 
-export type SkyMood = 'ludus' | 'arena' | 'town_morning' | 'town_dusk';
+export type SkyMood = 'ludus' | 'arena' | 'town_morning' | 'town_dusk' | 'city_cycle' | 'city_purge';
 
-/** Quantized low-poly PS1 sky dome with vertex-colored twilight bands, faceted celestial body, and distant horizon ruins. */
-export function Ps1Sky({ mood = 'ludus' }: { mood?: SkyMood }) {
+/** Quantized low-poly PS1 TRON megacity sky dome with digital processor disc & distant skyline spires. */
+export function Ps1Sky({ mood = 'city_cycle' }: { mood?: SkyMood }) {
   const skyGeo = useMemo(() => {
-    const geo = new THREE.SphereGeometry(280, 18, 10);
+    const geo = new THREE.SphereGeometry(320, 20, 10);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
-    const zenith = new THREE.Color(mood === 'town_morning' ? '#1b254a' : mood === 'town_dusk' ? '#0b081a' : '#080614');
+    const isMorning = mood === 'town_morning';
+    const isPurge = mood === 'city_purge';
+    const isCity = mood === 'city_cycle' || isPurge;
+
+    const zenith = new THREE.Color(isMorning ? '#1b254a' : isCity ? '#04030d' : '#080614');
     const mid = new THREE.Color(
-      mood === 'town_morning' ? '#49588a' : mood === 'town_dusk' ? '#2c1642' : mood === 'arena' ? '#211132' : '#181332',
+      isMorning ? '#49588a' : isPurge ? '#240b38' : isCity ? '#0c163a' : mood === 'arena' ? '#211132' : '#181332',
     );
     const horizon = new THREE.Color(
-      mood === 'town_morning' ? '#c2845e' : mood === 'town_dusk' ? '#7a3438' : mood === 'arena' ? '#5a2b2c' : '#2f204e',
+      isMorning ? '#c2845e' : isPurge ? '#8c184c' : isCity ? '#145a78' : mood === 'arena' ? '#5a2b2c' : '#2f204e',
     );
     const tmp = new THREE.Color();
 
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
-      const t = THREE.MathUtils.clamp(y / 280, 0, 1);
-      // Quantize into 7 crisp PS1 sky bands
+      const t = THREE.MathUtils.clamp(y / 320, 0, 1);
       const q = Math.floor(t * 7) / 7;
       if (q < 0.35) tmp.copy(horizon).lerp(mid, q / 0.35);
       else tmp.copy(mid).lerp(zenith, (q - 0.35) / 0.65);
@@ -35,23 +39,28 @@ export function Ps1Sky({ mood = 'ludus' }: { mood?: SkyMood }) {
     return geo;
   }, [mood]);
 
-  const silColor = mood === 'town_morning' ? '#2d2136' : mood === 'town_dusk' ? '#1d1024' : mood === 'arena' ? '#170c1c' : '#110c24';
-  const templeColor = mood === 'town_morning' ? '#3d2a3f' : mood === 'town_dusk' ? '#27142c' : mood === 'arena' ? '#1f1022' : '#171030';
-  const moonColor = mood === 'town_morning' ? '#ffe9a6' : mood === 'arena' || mood === 'town_dusk' ? '#ffe0b8' : '#f4ecd2';
-  const haloColor = mood === 'town_morning' || mood === 'arena' ? '#ffc95c' : '#a78bfa';
+  const isMorning = mood === 'town_morning';
+  const isPurge = mood === 'city_purge';
+  const isCity = mood === 'city_cycle' || isPurge;
 
-  const aqueducts = useMemo(() => {
-    const items: { x: number; z: number; ry: number; h: number; temple: boolean }[] = [];
-    const N = 24;
-    const R = 155;
+  const silColor = isPurge ? '#140822' : isCity ? '#091026' : mood === 'arena' ? '#170c1c' : '#110c24';
+  const rimColor = isPurge ? '#ff4fd8' : isCity ? '#3ff0ff' : '#a78bfa';
+  const coreColor = isMorning ? '#ffe9a6' : isPurge ? '#ff6b8b' : isCity ? '#8cf6ff' : '#f4ecd2';
+  const haloColor = isPurge ? '#ff4fd8' : isCity ? '#3ff0ff' : '#ffc95c';
+
+  const towers = useMemo(() => {
+    const items: { x: number; z: number; ry: number; h: number; w: number; spire: boolean }[] = [];
+    const N = 32;
+    const R = 185;
     for (let i = 0; i < N; i++) {
       const a = (i / N) * Math.PI * 2;
       items.push({
         x: Math.cos(a) * R,
         z: Math.sin(a) * R,
         ry: -a + Math.PI / 2,
-        h: i % 3 === 0 ? 18 : 13,
-        temple: i % 4 === 0,
+        h: 22 + ((i * 19) % 44),
+        w: 14 + ((i * 7) % 10),
+        spire: i % 3 === 0,
       });
     }
     return items;
@@ -63,30 +72,38 @@ export function Ps1Sky({ mood = 'ludus' }: { mood?: SkyMood }) {
         <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} />
       </mesh>
 
-      {/* Low-poly PS1 Celestial Disc */}
-      <group position={mood === 'town_morning' ? [58, 78, -165] : [-45, 92, -175]}>
+      {/* Pixelated Digital Processor Sun / System Core */}
+      <group position={isPurge ? [-62, 86, -210] : [58, 92, -210]}>
         <mesh>
-          <dodecahedronGeometry args={[11, 0]} />
-          <meshBasicMaterial color={moonColor} fog={false} />
+          <octahedronGeometry args={[14, 0]} />
+          <meshBasicMaterial color={coreColor} fog={false} />
         </mesh>
-        <mesh rotation={[0.2, 0.3, 0]}>
-          <ringGeometry args={[13.5, 16.5, 10]} />
-          <meshBasicMaterial color={haloColor} transparent opacity={0.18} side={THREE.DoubleSide} fog={false} />
+        <mesh rotation={[0.25, 0.25, 0]}>
+          <ringGeometry args={[18, 22, 8]} />
+          <meshBasicMaterial color={haloColor} transparent opacity={0.34} side={THREE.DoubleSide} fog={false} />
+        </mesh>
+        <mesh rotation={[-0.2, 0.6, 0]}>
+          <ringGeometry args={[25, 27, 12]} />
+          <meshBasicMaterial color={rimColor} transparent opacity={0.22} side={THREE.DoubleSide} fog={false} />
         </mesh>
       </group>
 
-      {/* Distant low-poly Colosseum / Aqueduct horizon silhouettes */}
+      {/* Distant Night City Megatower Skyline Ring */}
       <group>
-        {aqueducts.map((s, i) => (
-          <group key={i} position={[s.x, 0, s.z]} rotation={[0, s.ry, 0]}>
+        {towers.map((s, i) => (
+          <group key={i} position={[s.x, -26, s.z]} rotation={[0, s.ry, 0]}>
             <mesh position={[0, s.h / 2, 0]}>
-              <boxGeometry args={[22, s.h, 5]} />
-              <meshBasicMaterial color={silColor} />
+              <boxGeometry args={[s.w, s.h, 6]} />
+              <meshBasicMaterial color={silColor} fog={false} />
             </mesh>
-            {s.temple && (
-              <mesh position={[0, s.h + 4, 0]} rotation={[0, Math.PI / 4, 0]}>
-                <coneGeometry args={[14, 8, 4]} />
-                <meshBasicMaterial color={templeColor} />
+            <mesh position={[0, s.h - 2, 3.05]}>
+              <boxGeometry args={[s.w * 0.72, 0.9, 0.3]} />
+              <meshBasicMaterial color={i % 2 === 0 ? rimColor : '#ffc95c'} fog={false} />
+            </mesh>
+            {s.spire && (
+              <mesh position={[0, s.h + 8, 0]}>
+                <cylinderGeometry args={[0.15, 0.6, 16, 4]} />
+                <meshBasicMaterial color={rimColor} fog={false} />
               </mesh>
             )}
           </group>
@@ -96,12 +113,12 @@ export function Ps1Sky({ mood = 'ludus' }: { mood?: SkyMood }) {
   );
 }
 
-/** Chunky faceted PS1 bronze & stone fire brazier with animated low-poly flame cones. */
+/** Glowing PS1 Neon Plasma Pylon replacing ancient braziers, automatically conforming to horizon curvature. */
 export function Brazier({
   position,
   scale = 1,
   light = false,
-  color = '#ff8a2b',
+  color = '#3ff0ff',
 }: {
   position: [number, number, number];
   scale?: number;
@@ -114,10 +131,13 @@ export function Brazier({
   const pt = useRef<THREE.PointLight>(null!);
 
   const mats = useMemo(() => ({
-    stone: makePs1Material({ color: '#d0c6de', map: getPs1Texture('stone') }),
-    bronze: makePs1Material({ color: '#ffdd99', map: getPs1Texture('bronze') }),
-    coal: makePs1Material({ color: '#5a1b0f', emissive: '#ff5114', emissiveIntensity: 0.75 }),
-  }), []);
+    stone: makePs1Material({ color: '#1b1d36', map: getPs1Texture('conduit') }),
+    bronze: makePs1Material({ color: '#4d5d88', map: getPs1Texture('circuit') }),
+    coal: makePs1Material({ color: '#16384d', emissive: color, emissiveIntensity: 0.95 }),
+    flameOuter: makeCurvedBasicMaterial({ color }),
+    flameMid: makeCurvedBasicMaterial({ color: color === '#3ff0ff' ? '#ff4fd8' : '#ffc95c' }),
+    flameCore: makeCurvedBasicMaterial({ color: '#ffffff' }),
+  }), [color]);
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime + position[0] * 0.37 + position[2] * 0.21;
@@ -130,32 +150,25 @@ export function Brazier({
 
   return (
     <group position={position} scale={scale}>
-      {/* Stone pedestal */}
-      <mesh position={[0, 0.35, 0]} material={mats.stone}>
-        <cylinderGeometry args={[0.42, 0.56, 0.7, 6]} />
+      <mesh position={[0, 0.42, 0]} material={mats.stone}>
+        <cylinderGeometry args={[0.38, 0.56, 0.84, 4]} />
       </mesh>
-      {/* Bronze fire bowl */}
-      <mesh position={[0, 0.88, 0]} material={mats.bronze}>
-        <cylinderGeometry args={[0.68, 0.34, 0.42, 6]} />
+      <mesh position={[0, 0.94, 0]} material={mats.bronze}>
+        <cylinderGeometry args={[0.62, 0.34, 0.36, 4]} />
       </mesh>
-      {/* Glowing coal bed */}
-      <mesh position={[0, 1.06, 0]} material={mats.coal}>
-        <cylinderGeometry args={[0.52, 0.48, 0.1, 6]} />
+      <mesh position={[0, 1.12, 0]} material={mats.coal}>
+        <cylinderGeometry args={[0.46, 0.44, 0.1, 4]} />
       </mesh>
-      {/* Faceted low-poly flames */}
-      <mesh ref={f1} position={[0, 1.48, 0]}>
-        <coneGeometry args={[0.42, 0.92, 5]} />
-        <meshBasicMaterial color={color} />
+      <mesh ref={f1} position={[0, 1.56, 0]} material={mats.flameOuter}>
+        <octahedronGeometry args={[0.38, 0]} />
       </mesh>
-      <mesh ref={f2} position={[0.05, 1.42, -0.04]}>
-        <coneGeometry args={[0.26, 0.74, 4]} />
-        <meshBasicMaterial color="#ffc95c" />
+      <mesh ref={f2} position={[0.04, 1.5, -0.04]} material={mats.flameMid}>
+        <octahedronGeometry args={[0.24, 0]} />
       </mesh>
-      <mesh ref={f3} position={[-0.04, 1.32, 0.05]}>
-        <coneGeometry args={[0.15, 0.52, 4]} />
-        <meshBasicMaterial color="#fff6c7" />
+      <mesh ref={f3} position={[-0.03, 1.42, 0.04]} material={mats.flameCore}>
+        <octahedronGeometry args={[0.14, 0]} />
       </mesh>
-      {light && <pointLight ref={pt} position={[0, 2.2, 0]} color="#ff9d42" intensity={18} distance={26} decay={1.4} />}
+      {light && <pointLight ref={pt} position={[0, 2.2, 0]} color={color} intensity={18} distance={28} decay={1.4} />}
     </group>
   );
 }

@@ -55,6 +55,7 @@ interface Save {
   look: string;
   style: StyleId;
   ps1Mode: boolean;
+  bounty: number;
 }
 
 const KEY_V2 = 'boneyard.save.v2';
@@ -89,6 +90,7 @@ const blank = (): Save => ({
   look: 'cyan',
   style: 'murmillo',
   ps1Mode: true,
+  bounty: 0,
 });
 
 function mergeOwned(base: string[], raw: unknown, validIds: Set<string>): string[] {
@@ -173,10 +175,29 @@ export function loadSave(): Save {
       look: typeof p.look === 'string' && unlocks.includes(p.look) ? p.look : 'cyan',
       style: typeof p.style === 'string' && validStyles.has(p.style) ? (p.style as StyleId) : 'murmillo',
       ps1Mode: typeof p.ps1Mode === 'boolean' ? p.ps1Mode : true,
+      bounty: Number.isFinite(p.bounty) ? Math.max(0, p.bounty) : 0,
     };
   } catch {
     return b;
   }
+}
+
+export interface NearNpcHud {
+  id: number;
+  filename: string;
+  role: string;
+  mood: string;
+  hostile: boolean;
+  hp: number;
+  maxHp: number;
+  bark?: string;
+}
+
+export interface StreetToast {
+  speaker: string;
+  text: string;
+  color: string;
+  id: number;
 }
 
 interface GameState extends Save {
@@ -185,10 +206,30 @@ interface GameState extends Save {
   near: StationId | null;
   selectedCard: FightCard | null;
   lastResult: BoutOutcome | null;
+  weaponDrawn: boolean;
+  inJail: boolean;
+  arrestPrompt: { officerName: string; bounty: number } | null;
+  streetToast: StreetToast | null;
+  nearNpc: NearNpcHud | null;
+  streetVitals: { hp: number; maxHp: number; st: number; maxSt: number };
   setNear: (id: StationId | null) => void;
   openPanel: (id: StationId | null) => void;
   setScene: (s: Scene) => void;
   togglePs1Mode: () => void;
+  setWeaponDrawn: (drawn: boolean) => void;
+  toggleWeaponDrawn: () => void;
+  addBounty: (n: number) => void;
+  payBounty: () => boolean;
+  openArrestPrompt: (officerName: string) => void;
+  closeArrestPrompt: () => void;
+  enterJail: () => void;
+  serveJailSentence: () => void;
+  breakOutOfJail: () => void;
+  awardStreetReward: (cycles: number, xp: number, signal: number) => { levelsGained: number };
+  handleStreetDefeat: (cause: string) => BoutOutcome;
+  setStreetToast: (toast: Omit<StreetToast, 'id'> | null) => void;
+  setNearNpc: (npc: NearNpcHud | null) => void;
+  setStreetVitals: (v: { hp: number; maxHp: number; st: number; maxSt: number }) => void;
   buyAndEquipItem: (slot: GearSlot, id: string) => boolean;
   equipItem: (slot: GearSlot, id: string) => void;
   upgradeStat: (key: StatKey) => boolean;
@@ -264,9 +305,12 @@ export const useGame = create<GameState>((set, get) => {
       look: s.look,
       style: s.style,
       ps1Mode: s.ps1Mode,
+      bounty: s.bounty,
     };
     try { localStorage.setItem(KEY_V2, JSON.stringify(payload)); } catch { /* storage unavailable */ }
   };
+
+  let toastId = 0;
 
   return {
     ...loadSave(),
@@ -275,10 +319,101 @@ export const useGame = create<GameState>((set, get) => {
     near: null,
     selectedCard: null,
     lastResult: null,
+    weaponDrawn: false,
+    inJail: false,
+    arrestPrompt: null,
+    streetToast: null,
+    nearNpc: null,
+    streetVitals: { hp: 100, maxHp: 100, st: 100, maxSt: 100 },
     setNear: (near) => { if (get().near !== near) set({ near }); },
     openPanel: (panel) => set({ panel }),
-    setScene: (scene) => set({ scene, panel: null, near: null }),
+    setScene: (scene) => set({ scene, panel: null, near: null, arrestPrompt: null }),
     togglePs1Mode: () => { set({ ps1Mode: !get().ps1Mode }); save(); },
+    setWeaponDrawn: (weaponDrawn) => set({ weaponDrawn }),
+    toggleWeaponDrawn: () => set({ weaponDrawn: !get().weaponDrawn }),
+    addBounty: (n) => {
+      if (n <= 0) return;
+      set({ bounty: get().bounty + Math.round(n) });
+      save();
+    },
+    payBounty: () => {
+      const s = get();
+      if (s.bounty <= 0 || s.denarii < s.bounty) return false;
+      set({ denarii: s.denarii - s.bounty, bounty: 0, arrestPrompt: null });
+      save();
+      return true;
+    },
+    openArrestPrompt: (officerName) => {
+      const s = get();
+      if (s.arrestPrompt || s.inJail || s.panel) return;
+      set({ arrestPrompt: { officerName, bounty: s.bounty }, panel: null });
+    },
+    closeArrestPrompt: () => set({ arrestPrompt: null }),
+    enterJail: () => set({ arrestPrompt: null, inJail: true, weaponDrawn: false, panel: null }),
+    serveJailSentence: () => {
+      const s = get();
+      set({
+        day: s.day + 1,
+        timeOfDay: 'morning',
+        dailyBuffs: [],
+        trainedToday: false,
+        bounty: 0,
+        inJail: false,
+        arrestPrompt: null,
+      });
+      save();
+    },
+    breakOutOfJail: () => {
+      const s = get();
+      set({ inJail: false, arrestPrompt: null, bounty: s.bounty + 25 });
+      save();
+    },
+    awardStreetReward: (cycles, xpGain, signal) => {
+      const s = get();
+      const gear = resolveLoadout(s.loadout);
+      const famGain = signal > 0 ? Math.round(signal * gear.fameMul) : signal;
+      const lv = applyXp(s.level, s.xp, s.statPoints, xpGain);
+      set({
+        denarii: Math.max(0, s.denarii + cycles),
+        fame: Math.max(0, s.fame + famGain),
+        glory: Math.max(0, s.glory + Math.max(0, famGain)),
+        level: lv.level,
+        xp: lv.xp,
+        statPoints: lv.statPoints,
+      });
+      save();
+      return { levelsGained: lv.levelsGained };
+    },
+    handleStreetDefeat: (cause) => {
+      const s = get();
+      const healerFee = s.denarii > 0 ? Math.min(s.denarii, Math.max(10, Math.round(s.denarii * 0.15))) : 0;
+      const lostFame = Math.min(s.fame, 15);
+      const outcome: BoutOutcome = {
+        victory: false,
+        denariiDelta: -healerFee,
+        fameDelta: -lostFame,
+        xpEarned: 0,
+        levelsGained: 0,
+        healerFee,
+        cause,
+      };
+      set({
+        denarii: s.denarii - healerFee,
+        fame: s.fame - lostFame,
+        losses: s.losses + 1,
+        bounty: 0,
+        inJail: false,
+        weaponDrawn: false,
+        arrestPrompt: null,
+        lastResult: outcome,
+        fallen: [...s.fallen, { name: `Cycle ${s.day} Street De-Rez`, bouts: 1, cause, date: new Date().toISOString().slice(0, 10) }].slice(-50),
+      });
+      save();
+      return outcome;
+    },
+    setStreetToast: (toast) => set({ streetToast: toast ? { ...toast, id: ++toastId } : null }),
+    setNearNpc: (nearNpc) => set({ nearNpc }),
+    setStreetVitals: (streetVitals) => set({ streetVitals }),
 
     buyAndEquipItem: (slot, id) => {
       const s = get();

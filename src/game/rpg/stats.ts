@@ -15,11 +15,11 @@ export interface RpgStats {
 export const DEFAULT_STATS: RpgStats = { vit: 1, str: 1, agi: 1, end: 1, tec: 1 };
 
 export const STAT_INFO: Record<StatKey, { label: string; short: string; desc: string; color: string }> = {
-  vit: { label: 'VITALITY', short: 'VIT', desc: '+14 Max HP & limb durability per point', color: '#ff4f6d' },
-  str: { label: 'STRENGTH', short: 'STR', desc: '+6% weapon & heavy damage per point', color: '#ff8a3d' },
-  agi: { label: 'AGILITY', short: 'AGI', desc: '+3.5% move speed & cheaper dodges', color: '#4dffa0' },
-  end: { label: 'ENDURANCE', short: 'END', desc: '+10 Max Stamina & +8% stamina regen', color: '#3ff0ff' },
-  tec: { label: 'TECHNIQUE', short: 'TEC', desc: 'Wider parry window & harder Ripostes', color: '#ffc95c' },
+  vit: { label: 'INTEGRITY', short: 'VIT', desc: '+14 Max Integrity HP & limb durability per point', color: '#ff4f6d' },
+  str: { label: 'OVERCLOCK', short: 'STR', desc: '+6% hard-light & heavy damage per point', color: '#ff8a3d' },
+  agi: { label: 'CLOCKSPEED', short: 'AGI', desc: '+3.5% move speed & cheaper evades', color: '#4dffa0' },
+  end: { label: 'BANDWIDTH', short: 'END', desc: '+10 Max Energy & +8% energy recharge', color: '#3ff0ff' },
+  tec: { label: 'PRECISION', short: 'TEC', desc: 'Wider parry window & harder Ripostes', color: '#ffc95c' },
 };
 
 export function xpForNextLevel(level: number): number {
@@ -47,13 +47,13 @@ export function applyXp(
 
 export interface FameRank { name: string; min: number; color: string }
 export const FAME_RANKS: FameRank[] = [
-  { name: 'RECRUIT', min: 0, color: '#cfc6e8' },
-  { name: 'PIT FIGHTER', min: 60, color: '#3ff0ff' },
-  { name: 'BLOODED', min: 150, color: '#4dffa0' },
-  { name: 'CROWD FAVORITE', min: 300, color: '#ffc95c' },
-  { name: 'GLADIATOR', min: 550, color: '#ff8a3d' },
-  { name: 'CHAMPION', min: 900, color: '#ff4fd8' },
-  { name: 'LIVING LEGEND', min: 1400, color: '#ffe57f' },
+  { name: 'ORPHANED_BIT', min: 0, color: '#cfc6e8' },
+  { name: 'SECTOR_STRAY', min: 60, color: '#3ff0ff' },
+  { name: 'RESIDENT_LINE', min: 150, color: '#4dffa0' },
+  { name: 'GRID_RUNNER', min: 300, color: '#ffc95c' },
+  { name: 'DAEMON_SLAYER', min: 550, color: '#ff8a3d' },
+  { name: 'SYS_CHAMPION', min: 900, color: '#ff4fd8' },
+  { name: 'ROOT_LEGEND', min: 1400, color: '#ffe57f' },
 ];
 
 export function fameRankOf(fame: number): FameRank {
@@ -80,10 +80,10 @@ export interface ConsumableDef {
 }
 
 export const CONSUMABLES: ConsumableDef[] = [
-  { id: 'healing_flask', name: 'HEALING FLASK [H]', desc: 'Drink in combat to mend 45% HP & bruised limbs (max 3 carried).', cost: 20, color: '#4dffa0', kind: 'flask' },
-  { id: 'honey_bread', name: 'ROMAN HONEY BREAD', desc: 'Today only: +25 Max Health before your next sleep.', cost: 25, color: '#ffc95c', kind: 'buff' },
-  { id: 'iron_wine', name: 'SPICED IRON WINE', desc: 'Today only: +25% Stamina Recovery in the sand.', cost: 30, color: '#3ff0ff', kind: 'buff' },
-  { id: 'whetstone_oil', name: 'WHETSTONE BLADE OIL', desc: 'Today only: +15% Attack Damage across all bouts.', cost: 35, color: '#ff6b6b', kind: 'buff' },
+  { id: 'healing_flask', name: 'RESTORE FLASK [H]', desc: 'Drink in combat to patch 45% Integrity & damaged limbs (max 3).', cost: 20, color: '#4dffa0', kind: 'flask' },
+  { id: 'honey_bread', name: 'CACHE RATION', desc: 'This cycle only: +25 Max Integrity HP before next Defrag.', cost: 25, color: '#ffc95c', kind: 'buff' },
+  { id: 'iron_wine', name: 'COOLANT STIMM', desc: 'This cycle only: +25% Bandwidth Stamina Recovery.', cost: 30, color: '#3ff0ff', kind: 'buff' },
+  { id: 'whetstone_oil', name: 'EDGE COMPILER', desc: 'This cycle only: +15% Hard-Light Attack Damage.', cost: 35, color: '#ff6b6b', kind: 'buff' },
 ];
 
 export function buildPlayerMods(

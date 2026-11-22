@@ -48,13 +48,13 @@ export interface FightCard {
 }
 
 const QUEST_POOL: Omit<Quest, 'id' | 'progress' | 'claimed'>[] = [
-  { title: 'BLOOD ON THE SAND', desc: 'Defeat 2 gladiators in the Colosseum.', kind: 'kills', target: 2, denarii: 55, xp: 40, fame: 25 },
-  { title: 'IRON TIMING', desc: 'Land 2 timed Parries [SHIFT] in battle.', kind: 'parries', target: 2, denarii: 70, xp: 50, fame: 35 },
-  { title: 'SHATTER THEIR PRIDE', desc: 'Break 2 enemy helms, pauldrons, or shields.', kind: 'armors', target: 2, denarii: 75, xp: 55, fame: 35 },
-  { title: 'PHALANX TRIAL', desc: 'Win a bout wielding any Spear.', kind: 'win_weapon', weaponFamily: 'spear', target: 1, denarii: 65, xp: 45, fame: 30 },
-  { title: 'CRUSHING SHOW', desc: 'Win a bout wielding any Warhammer.', kind: 'win_weapon', weaponFamily: 'warhammer', target: 1, denarii: 80, xp: 55, fame: 40 },
-  { title: 'TWIN FANGS', desc: 'Win a bout wielding Twin Curved Sica.', kind: 'win_weapon', weaponFamily: 'twinSica', target: 1, denarii: 70, xp: 50, fame: 35 },
-  { title: 'PURIST VICTORY', desc: 'Win a bout without drinking a Healing Flask.', kind: 'no_flask', target: 1, denarii: 85, xp: 60, fame: 45 },
+  { title: 'GARBAGE COLLECTION', desc: 'De-rez 2 deleted-file fighters on the Purge Grid.', kind: 'kills', target: 2, denarii: 55, xp: 40, fame: 25 },
+  { title: 'ZERO-LATENCY PARRY', desc: 'Land 2 timed Parries [SHIFT] in battle.', kind: 'parries', target: 2, denarii: 70, xp: 50, fame: 35 },
+  { title: 'SHATTER THEIR SHELLS', desc: 'Break 2 enemy visors, plates, or holo-shields.', kind: 'armors', target: 2, denarii: 75, xp: 55, fame: 35 },
+  { title: 'VECTOR PROTOCOL', desc: 'Win a Purge bout wielding any Vector Spear.', kind: 'win_weapon', weaponFamily: 'spear', target: 1, denarii: 65, xp: 45, fame: 30 },
+  { title: 'KERNEL SMASH', desc: 'Win a Purge bout wielding any Hex Maul.', kind: 'win_weapon', weaponFamily: 'warhammer', target: 1, denarii: 80, xp: 55, fame: 40 },
+  { title: 'TWIN DAEMONS', desc: 'Win a Purge bout wielding Twin Glitch-Sicas.', kind: 'win_weapon', weaponFamily: 'twinSica', target: 1, denarii: 70, xp: 50, fame: 35 },
+  { title: 'UNPATCHED CLEAR', desc: 'Win a Purge bout without drinking a Restore Flask.', kind: 'no_flask', target: 1, denarii: 85, xp: 60, fame: 45 },
 ];
 
 export function generateDailyQuests(day: number): Quest[] {
@@ -83,18 +83,18 @@ export function updateQuestProgress(quests: Quest[], summary: BoutSummary): Ques
   });
 }
 
-const RIVAL_NAMES = ['CASSIUS', 'TITUS', 'VEXAR', 'DRUSUS', 'SCORPIUS', 'OCTAVIUS', 'VALERIUS', 'BRUTUS'];
+const RIVAL_NAMES = ['cassius_04.exe', 'titus_old.dll', 'vexar.bin', 'drusus.sys', 'scorpius.tmp', 'octavius.dat', 'valerius.bak', 'brutus.img'];
 
 const TIER1_LOADOUTS: { style: StyleId; loadout: Loadout; tag: string }[] = [
-  { style: 'murmillo', tag: 'Gladius & Buckler', loadout: { weaponId: 'iron_gladius', offhandId: 'wooden_buckler', helmId: 'leather_cap', bodyId: 'recruit_tunic', capeId: 'none' } },
-  { style: 'dimachaerus', tag: 'Twin Sica Initiate', loadout: { weaponId: 'twin_sica', offhandId: 'none', helmId: 'horned_mask', bodyId: 'recruit_tunic', capeId: 'none' } },
-  { style: 'hoplomachus', tag: 'Spear & Scarf', loadout: { weaponId: 'recruit_spear', offhandId: 'wooden_buckler', helmId: 'leather_cap', bodyId: 'retiarius_galerus', capeId: 'tattered_scarf' } },
+  { style: 'murmillo', tag: 'Pulse Gladius & Buckler', loadout: { weaponId: 'iron_gladius', offhandId: 'wooden_buckler', helmId: 'leather_cap', bodyId: 'recruit_tunic', capeId: 'none' } },
+  { style: 'dimachaerus', tag: 'Twin Glitch-Sicas', loadout: { weaponId: 'twin_sica', offhandId: 'none', helmId: 'horned_mask', bodyId: 'recruit_tunic', capeId: 'none' } },
+  { style: 'hoplomachus', tag: 'Vector Spear & Streamer', loadout: { weaponId: 'recruit_spear', offhandId: 'wooden_buckler', helmId: 'leather_cap', bodyId: 'retiarius_galerus', capeId: 'tattered_scarf' } },
 ];
 
 const TIER2_LOADOUTS: { style: StyleId; loadout: Loadout; tag: string }[] = [
-  { style: 'retiarius', tag: 'Spear & Energy Net Hybrid', loadout: { weaponId: 'recruit_spear', offhandId: 'gladiator_net', helmId: 'none', bodyId: 'retiarius_galerus', capeId: 'tattered_scarf' } },
-  { style: 'murmillo', tag: 'Tempered Gladius & Scutum', loadout: { weaponId: 'steel_gladius', offhandId: 'tower_scutum', helmId: 'murmillo_galea', bodyId: 'bronze_manica', capeId: 'none' } },
-  { style: 'executioner', tag: 'Warhammer Bruiser', loadout: { weaponId: 'iron_warhammer', offhandId: 'none', helmId: 'iron_cage', bodyId: 'spiked_iron', capeId: 'none' } },
+  { style: 'retiarius', tag: 'Vector Spear & Trap Net', loadout: { weaponId: 'recruit_spear', offhandId: 'gladiator_net', helmId: 'none', bodyId: 'retiarius_galerus', capeId: 'tattered_scarf' } },
+  { style: 'murmillo', tag: 'Circuit Gladius & Holo Scutum', loadout: { weaponId: 'steel_gladius', offhandId: 'tower_scutum', helmId: 'murmillo_galea', bodyId: 'bronze_manica', capeId: 'none' } },
+  { style: 'executioner', tag: 'Hex Maul Enforcer', loadout: { weaponId: 'iron_warhammer', offhandId: 'none', helmId: 'iron_cage', bodyId: 'spiked_iron', capeId: 'none' } },
 ];
 
 export function generateFightCards(day: number, fame: number): FightCard[] {
@@ -104,12 +104,12 @@ export function generateFightCards(day: number, fame: number): FightCard[] {
   const name2 = RIVAL_NAMES[(day + 3) % RIVAL_NAMES.length];
   const name3a = RIVAL_NAMES[(day + 2) % RIVAL_NAMES.length];
   const name3b = RIVAL_NAMES[(day + 5) % RIVAL_NAMES.length];
-  const champScaleBonus = fame >= 550 ? 'LEGENDARY' : 'CROWNED';
+  const champScaleBonus = fame >= 550 ? 'ROOT-LEVEL' : 'CROWNED';
 
   return [
     {
       id: `d${day}_pit`,
-      title: 'PIT SKIRMISH',
+      title: 'CACHE SKIRMISH',
       subtitle: `1v1 · ${name1} (${r1.tag})`,
       tier: 1,
       reqFame: 0,
@@ -120,7 +120,7 @@ export function generateFightCards(day: number, fame: number): FightCard[] {
     },
     {
       id: `d${day}_rival`,
-      title: 'RIVAL DUEL',
+      title: 'MEMORY DUEL',
       subtitle: `1v1 · ${name2} (${r2.tag})`,
       tier: 2,
       reqFame: 0,
@@ -131,8 +131,8 @@ export function generateFightCards(day: number, fame: number): FightCard[] {
     },
     {
       id: `d${day}_gauntlet`,
-      title: 'TWIN GAUNTLET',
-      subtitle: `2v1 · ${name3a} (Trident & Net) + ${name3b} (Spear)`,
+      title: 'DUAL PROCESS',
+      subtitle: `2v1 · ${name3a} (Trident & Net) + ${name3b} (Vector Spear)`,
       tier: 3,
       reqFame: 60,
       denarii: 140,
@@ -145,8 +145,8 @@ export function generateFightCards(day: number, fame: number): FightCard[] {
     },
     {
       id: `d${day}_main`,
-      title: `${champScaleBonus} MAIN EVENT`,
-      subtitle: 'Championship · Gilded Spear Champion + Warhammer Enforcer',
+      title: `${champScaleBonus} PURGE`,
+      subtitle: 'Main Event · Zero-Day Lance Sovereign + Purge Crusher',
       tier: 4,
       reqFame: 150,
       denarii: 260,
@@ -154,13 +154,13 @@ export function generateFightCards(day: number, fame: number): FightCard[] {
       fame: 140,
       enemies: [
         {
-          name: 'Crixus Imperator',
+          name: 'crixus_root.sys',
           kind: 'champion',
           style: 'hoplomachus',
           loadout: { weaponId: 'champion_spear', offhandId: 'bronze_buckler', helmId: 'corinthian_gold', bodyId: 'champion_cuirass', capeId: 'imperial_mantle' },
         },
         {
-          name: 'THEOKOLES',
+          name: 'theokoles_00.img',
           kind: 'brute',
           style: 'executioner',
           loadout: { weaponId: 'maul_breaker', offhandId: 'none', helmId: 'iron_cage', bodyId: 'spiked_iron', capeId: 'none' },
