@@ -1,5 +1,6 @@
 import type { Bounds, Circle } from './colliders';
 import { SOLIDS, type StationId } from './layout';
+import { memoryTreeCollidersNear } from './MemoryWoods';
 
 export const WORLD_BOUNDS: Bounds = { minX: -2000, maxX: 2000, minZ: -2000, maxZ: 2000 };
 
@@ -827,5 +828,6 @@ export function collidersNear(x: number, z: number): Circle[] {
       out.push({ x: p.signX, z: p.signZ, r: 0.45 });
     }
   }
+  out.push(...memoryTreeCollidersNear(x, z));
   return out;
 }

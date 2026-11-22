@@ -33,6 +33,7 @@ import {
   biomeAt, collidersNear, isSanctuaryPosition, nearestColosseum, nearestSettlement,
   nearestSettlementTerminal, nearestWorldColosseumGate, regionDisplayName, WORLD_BOUNDS,
 } from './world/universe';
+import { boostRingsNear, memoryTreesNear } from './world/MemoryWoods';
 import { nearestPropertyDeed } from './world/properties';
 import { InfiniteCurvedFloor, NearestColosseumBeacon, StreamingSettlements } from './world/WorldRenderer';
 import {
@@ -687,6 +688,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     sideCamDir: THREE.Vector2;
     lastTapA: number;
     lastTapD: number;
+    vaultChain: number;
+    vaultChainWindow: number;
+    lastRingId: string | null;
+    ringCd: number;
     time: number;
   }>(null!);
 
@@ -736,6 +741,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       sideCamDir: new THREE.Vector2(1, 0),
       lastTapA: -9,
       lastTapD: -9,
+      vaultChain: 0,
+      vaultChainWindow: 0,
+      lastRingId: null,
+      ringCd: 0,
       time: 0,
     };
   }
@@ -1028,11 +1037,32 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       }
     }
 
-    // Mouse look + 2.5D Side-Duel tracking / Q-E orbit / R-F tilt
+    // Mouse look + 2.5D Side-Duel tracking (with stationary 3D lane rotation) / Q-E orbit / R tilt
     const showcaseOpen = curGamePre.panel === 'locker' || curGamePre.panel === 'smith' || curGamePre.panel === 'armorer';
     const ml = consumeMouseLook();
+    let pivotLocalVx = 0;
+    const rawSideInput = !frozen ? ((keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0)) : 0;
     if (!frozen && !showcaseOpen) {
       if (duelNpc) {
+        if (rawSideInput === 0 && p.state === 'idle') {
+          const upK = keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0;
+          const dnK = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0;
+          const laneRotate = THREE.MathUtils.clamp((upK - dnK) + (keys.has('KeyQ') ? 1 : 0) - (keys.has('KeyE') ? 1 : 0) - ml.dx * 0.08, -1.6, 1.6);
+          if (Math.abs(laneRotate) > 0.01) {
+            const relX = p.x - duelNpc.x;
+            const relZ = p.z - duelNpc.z;
+            const dOpp = Math.hypot(relX, relZ);
+            if (dOpp > 0.4) {
+              const ang = laneRotate * 1.55 * rawDt;
+              const c = Math.cos(ang), sn = Math.sin(ang);
+              const cand = { x: duelNpc.x + relX * c - relZ * sn, z: duelNpc.z + relX * sn + relZ * c };
+              resolveCircles(cand, PLAYER_R, collidersNear(cand.x, cand.z));
+              p.x = cand.x;
+              p.z = cand.z;
+              pivotLocalVx = THREE.MathUtils.clamp(laneRotate * 0.7, -1, 1);
+            }
+          }
+        }
         const dxD = duelNpc.x - p.x, dzD = duelNpc.z - p.z;
         const dD = Math.hypot(dxD, dzD) || 1;
         const n1x = -dzD / dD, n1z = dxD / dD;
@@ -1059,7 +1089,6 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     if (orbit) s.yaw += orbit * KB_YAW_SENS * rawDt * 60;
     let tilt = 0;
     if (!duelNpc && keys.has('KeyR')) tilt += 1;
-    if (!duelNpc && keys.has('KeyF') && !curGamePre.weaponDrawn) tilt -= 1;
     if (tilt) s.pitch = Math.max(-0.75, Math.min(1.15, s.pitch + tilt * KB_YAW_SENS * rawDt * 60));
 
     const fxDir = -Math.sin(s.yaw), fzDir = -Math.cos(s.yaw);
@@ -1308,6 +1337,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
           ? liveHostiles.sort((a, b2) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b2.x - p.x, b2.z - p.z))[0]
           : null;
       const strike = stepFighter(p, intent, dt, aimTarget && Math.hypot(aimTarget.x - p.x, aimTarget.z - p.z) < 12 ? aimTarget : null);
+      if (pivotLocalVx !== 0) p.localVx = pivotLocalVx;
       if (p.state !== 'idle' && prev === 'idle') { b.light = 0; b.heavy = 0; b.bash = 0; b.dodge = 0; b.jump = 0; }
       if (p.airY > 0) b.jump = 0;
       if (p.parryHold > 0 || p.blocking) b.parry = 0;
@@ -1349,30 +1379,94 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         }
       }
     } else {
-      // Unarmed sprint + Dash-Vault navigation across the open continent
+      // Unarmed sprint + Rhythmic Slide-Vault Chain + [F] Canopy Grapple-Launch
       s.cycleSpeed = 0;
       p.state = 'idle';
       p.atk = null;
       p.blocking = false;
       p.stats = { ...p.stats, speed: PLAYER_COMBAT_SPEED, color: lookColor(look) };
 
+      if (s.vaultChainWindow > 0) {
+        s.vaultChainWindow = Math.max(0, s.vaultChainWindow - dt);
+        if (s.vaultChainWindow === 0) s.vaultChain = 0;
+      }
+
       if (!frozen && !curGame.inJail && pressed('Space') && !hasInteractPrompt && moveLen > 0 && s.unarmedDashT <= 0) {
+        if (s.vaultChainWindow > 0) {
+          s.vaultChain = Math.min(3, s.vaultChain + 1);
+          s.vaultChainWindow = 0;
+        } else {
+          s.vaultChain = 1;
+        }
         s.unarmedDashT = 0.30;
         s.unarmedDashDir = { x: moveX, z: moveZ };
         p.yaw = Math.atan2(moveX, moveZ);
         sfx.dodge();
-        for (let gi = 0; gi < 3; gi++) {
-          fx.ghosts.spawn(p.x - moveX * gi * 0.45, p.z - moveZ * gi * 0.45, p.yaw, lookColor(look), moveZ * 0.45, -moveX * 0.45);
+        if (s.vaultChain >= 2) {
+          sfx.boost();
+          s.fovKick = Math.max(s.fovKick, 4.5);
+          fx.shards.burst(p.x, 0.4, p.z, 12, 6, '#ffc95c', -moveX, -moveZ);
+          game.triggerStreetCallout(`MOMENTUM CHAIN ×${s.vaultChain}!`, s.vaultChain >= 3 ? '#ffc95c' : '#3ff0ff');
         }
+        for (let gi = 0; gi < 3; gi++) {
+          fx.ghosts.spawn(p.x - moveX * gi * 0.45, p.z - moveZ * gi * 0.45, p.yaw, s.vaultChain >= 2 ? '#ffc95c' : lookColor(look), moveZ * 0.45, -moveX * 0.45);
+        }
+      }
+
+      // [F] Hard-Light Canopy / Boost-Archway Grapple-Launch across wilderness
+      if (!frozen && !curGame.inJail && pressed('KeyF')) {
+        const trees = memoryTreesNear(p.x, p.z, 28);
+        const rings = boostRingsNear(p.x, p.z, 28);
+        const aimX = moveLen > 0 ? moveX : fxDir;
+        const aimZ = moveLen > 0 ? moveZ : fzDir;
+        let bestAnchor: { x: number; z: number } | null = null;
+        let bestScore = -Infinity;
+        for (const cand of [...rings, ...trees]) {
+          const dxA = cand.x - p.x, dzA = cand.z - p.z;
+          const distA = Math.hypot(dxA, dzA);
+          if (distA < 5 || distA > 26) continue;
+          const align = (dxA / distA) * aimX + (dzA / distA) * aimZ;
+          const score = align * 14 - distA * 0.25;
+          if (align > 0.15 && score > bestScore) { bestScore = score; bestAnchor = cand; }
+        }
+        if (bestAnchor) {
+          const dxG = bestAnchor.x - p.x, dzG = bestAnchor.z - p.z;
+          const dG = Math.hypot(dxG, dzG) || 1;
+          const uxG = dxG / dG, uzG = dzG / dG;
+          p.kx = uxG * 32;
+          p.kz = uzG * 32;
+          p.airVy = 8.2;
+          p.airY = 0.06;
+          p.yaw = Math.atan2(uxG, uzG);
+          s.unarmedDashT = 0.42;
+          s.unarmedDashDir = { x: uxG, z: uzG };
+          s.vaultChain = 2;
+          s.fovKick = 5.5;
+          sfx.boost();
+          fx.slashes.spawn(p.x, p.z, p.yaw, 'light3', '#3ff0ff', p.style, 'thrust');
+          fx.shards.burst(bestAnchor.x, 2.2, bestAnchor.z, 18, 7, '#3ff0ff');
+          game.triggerStreetCallout('CANOPY GRAPPLE!', '#3ff0ff');
+        }
+      }
+
+      if (p.airY > 0 || p.airVy !== 0) {
+        p.airVy -= 20 * dt;
+        p.airY += p.airVy * dt;
+        if (p.airY <= 0) { p.airY = 0; p.airVy = 0; }
       }
 
       const sprintingUnarmed = !frozen && (keys.has('ShiftLeft') || keys.has('ShiftRight')) && moveLen > 0;
       if (s.unarmedDashT > 0) {
         s.unarmedDashT = Math.max(0, s.unarmedDashT - dt);
-        p.vx = s.unarmedDashDir.x * DASH_VAULT_SPEED;
-        p.vz = s.unarmedDashDir.z * DASH_VAULT_SPEED;
-        s.lastMoveSpeed = DASH_VAULT_SPEED;
+        if (s.unarmedDashT === 0) s.vaultChainWindow = 0.42;
+        const dashSpd = s.vaultChain >= 3 ? 32 : s.vaultChain === 2 ? 29 : DASH_VAULT_SPEED;
+        p.vx = s.unarmedDashDir.x * dashSpd;
+        p.vz = s.unarmedDashDir.z * dashSpd;
+        s.lastMoveSpeed = dashSpd;
         p.localVz = 1;
+        if (s.vaultChain >= 2 && Math.random() < 0.4) {
+          fx.shards.burst(p.x, 0.16, p.z, 1, 3.2, '#ffc95c', -s.unarmedDashDir.x, -s.unarmedDashDir.z);
+        }
       } else {
         const targetSpd = !frozen && moveLen > 0 ? (sprintingUnarmed ? UNARMED_SPRINT_SPEED : UNARMED_JOG_SPEED) : 0;
         const accel = moveLen > 0 ? 14 : 18;
@@ -1411,6 +1505,32 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     }
     p.x = posTmp.x;
     p.z = posTmp.z;
+
+    // Wilderness Overclock Boost-Archways
+    if (s.ringCd > 0) s.ringCd = Math.max(0, s.ringCd - rawDt);
+    else s.lastRingId = null;
+    if (!curGame.inJail) {
+      for (const rg of boostRingsNear(p.x, p.z, 24)) {
+        if (Math.hypot(p.x - rg.x, p.z - rg.z) < 2.8 && s.lastRingId !== rg.id) {
+          s.lastRingId = rg.id;
+          s.ringCd = 1.6;
+          p.stamina = p.maxStamina;
+          if (curGame.onCycle) {
+            s.cycleBoostT = 1.8;
+            s.cycleSpeed = CYCLE_BOOST_SPEED;
+          } else {
+            s.unarmedDashT = 0.55;
+            s.unarmedDashDir = { x: Math.sin(p.yaw), z: Math.cos(p.yaw) };
+            s.vaultChain = 3;
+          }
+          s.fovKick = 6.0;
+          sfx.boost();
+          fx.shards.burst(rg.x, 2.2, rg.z, 24, 9.5, rg.color);
+          game.triggerStreetCallout('OVERCLOCK ARCHWAY! +SPEED', rg.color);
+          break;
+        }
+      }
+    }
 
     cycleState.current.active = curGame.onCycle && !curGame.inJail;
     cycleState.current.x = p.x;

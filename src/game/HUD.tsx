@@ -1635,7 +1635,7 @@ function ArenaHud() {
       )}
       <div className="controls">
         <KeyCap k="A/D" label="Lane (×2 Dash)" />
-        <KeyCap k="W/S" label="Stance" />
+        <KeyCap k="W/S" label="Stance + 3D Pivot" />
         <KeyCap k="SPACE" label="Jump/DiveKick" />
         <KeyCap k="LMB/J" label="Thrust" />
         <KeyCap k="RMB/K" label="Launch/Sweep" />
@@ -1689,7 +1689,8 @@ export function HUD() {
         <div className="controls">
           <KeyCap k="WASD" label="Move" />
           <KeyCap k="V" label="Cycle" />
-          <KeyCap k="SPACE" label="Dash/Drift" />
+          <KeyCap k="F" label="Grapple" />
+          <KeyCap k="SPACE" label="ChainDash/Drift" />
           <KeyCap k="TAB" label="Lock" />
           <KeyCap k="E" label="Execute" />
           <KeyCap k="M" label="Atlas" />

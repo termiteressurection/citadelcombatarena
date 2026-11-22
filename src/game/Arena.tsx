@@ -448,8 +448,29 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
   }
 
   const mouseLook = consumeMouseLook();
-  // Camera orientation: 2.5D perpendicular side-cam when locked on, or free orbit
+  let pivotLocalVx = 0;
+  // Camera orientation: 2.5D perpendicular side-cam when locked on (+ 3D stationary lane rotation), or free orbit
   if (w.lockOn && locked) {
+    if (fighting && player.state === 'idle') {
+      const rightInput = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
+      if (rightInput === 0) {
+        const upK = keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0;
+        const dnK = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0;
+        const laneRotate = THREE.MathUtils.clamp((upK - dnK) + (keys.has('KeyQ') ? 1 : 0) - (keys.has('KeyE') ? 1 : 0) - mouseLook.dx * 0.08, -1.6, 1.6);
+        if (Math.abs(laneRotate) > 0.01) {
+          const relX = player.x - locked.x;
+          const relZ = player.z - locked.z;
+          const distOpp = Math.hypot(relX, relZ);
+          if (distOpp > 0.4) {
+            const ang = laneRotate * 1.55 * dt;
+            const c = Math.cos(ang), sn = Math.sin(ang);
+            player.x = locked.x + relX * c - relZ * sn;
+            player.z = locked.z + relX * sn + relZ * c;
+            pivotLocalVx = THREE.MathUtils.clamp(laneRotate * 0.7, -1, 1);
+          }
+        }
+      }
+    }
     const dx = locked.x - player.x, dz = locked.z - player.z;
     const d = Math.hypot(dx, dz) || 1;
     w.camFwd.set(dx / d, dz / d);
@@ -488,6 +509,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     const strike = stepFighter(f, intent, dt, target);
 
     if (f === player) {
+      if (pivotLocalVx !== 0) f.localVx = pivotLocalVx;
       if (f.state !== 'idle' && prev === 'idle') { b.light = 0; b.heavy = 0; b.bash = 0; b.dodge = 0; b.jump = 0; }
       if (f.airY > 0) b.jump = 0;
       if (f.parryHold > 0 || f.blocking) b.parry = 0;

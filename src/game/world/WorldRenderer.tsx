@@ -6,6 +6,7 @@ import { Brazier } from '../art/Ps1Sky';
 import { CITY_CURVE_RADIUS, curveDrop, makeCurvedBasicMaterial } from '../art/curvature';
 import { cloneTex, getPs1Texture, makePs1Material } from '../art/ps1Textures';
 import { useGame } from '../store';
+import { MemoryWoodsAndFlora } from './MemoryWoods';
 import { PROPERTIES, propertyRentPayout, type PropertyDef } from './properties';
 import {
   biomeAt, CAPITALS, nearestColosseum, SATELLITES, settlementBuildings,
@@ -526,6 +527,7 @@ export function StreamingSettlements({ playerPos }: { playerPos: React.MutableRe
         <DistantCapitalHorizonSilhouette key={`dist-${c.id}`} cap={c} playerPos={playerPos} />
       ))}
       {activeProps.map((p) => <PropertyDeedView key={p.id} prop={p} />)}
+      <MemoryWoodsAndFlora playerPos={playerPos} />
     </group>
   );
 }

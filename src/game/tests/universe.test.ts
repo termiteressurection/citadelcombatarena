@@ -4,6 +4,7 @@ import {
   CAPITALS, COLOSSEUMS, SATELLITES, SETTLEMENTS, WORLD_BOUNDS,
   collidersNear, isSanctuaryPosition, nearestColosseum, nearestWorldColosseumGate,
 } from '../world/universe';
+import { memoryTreesNear } from '../world/MemoryWoods';
 import {
   PROPERTIES, discountedCost, nearestPropertyDeed, ownerShopDiscount,
   propertyRenovateCost, propertyRentPayout, propertySellValue, reputationDeltaForRent, reputationRankOf,
@@ -113,5 +114,21 @@ describe('Fable-inspired property ownership, rent, renovation & reputation', () 
     const ownedOne = { [shopProp.id]: { id: shopProp.id, mode: 'rent' as const, rentRate: 'fair' as const, tier: 1 as const } };
     expect(ownerShopDiscount(ownedOne)).toBeCloseTo(0.15);
     expect(discountedCost(100, ownedOne)).toBe(85);
+  });
+
+  it('populates varied Citadel Memory Trees in the wilderness while keeping Capital plazas clear', () => {
+    // Capital plaza center (0, 0) is completely clear of Memory Trees
+    expect(memoryTreesNear(0, 0, 95)).toHaveLength(0);
+
+    // Countryside wilderness has multiple varied Citadel Memory Tree styles
+    const wildTrees = memoryTreesNear(480, 480, 260);
+    expect(wildTrees.length).toBeGreaterThanOrEqual(8);
+    const variants = new Set(wildTrees.map((t) => t.variant));
+    expect(variants.size).toBeGreaterThanOrEqual(3);
+
+    // Trunk colliders appear cleanly inside collidersNear near any Memory Tree
+    const t0 = wildTrees[0];
+    const solids = collidersNear(t0.x, t0.z);
+    expect(solids.some((c) => Math.hypot(c.x - t0.x, c.z - t0.z) < 0.05 && c.r === t0.trunkRadius)).toBe(true);
   });
 });
