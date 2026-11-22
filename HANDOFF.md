@@ -6,7 +6,7 @@ Unrelated to the Citadel project; repo is only a source of art/tech. Ludus = cal
 
 ## Run
 `npm install && npm run dev` (browser, http://127.0.0.1:5173; add `?arena` to jump straight into a bout)
-`npm run package:mac` (rebuilds + cleanly replaces `/Applications/BONEYARD.app` & `~/Desktop/BONEYARD.app` + clears WebKit cache)
+`npm run package:mac` (rebuilds + replaces `/Applications/BONEYARD.app` & `~/Desktop/BONEYARD.app`; quit BONEYARD first; preserves WebKit data and cache)
 `npm run dev:tauri` (Mac shell) · `npm run build` · `npx vitest run` · `cd src-tauri && cargo check`
 
 ## Status (Spartacus Overhaul — Option A)
@@ -65,8 +65,12 @@ Unrelated to the Citadel project; repo is only a source of art/tech. Ludus = cal
   - **Living NPC Schedules & Hard-Light Cycles (`world/citizens.ts`, `Ludus.tsx`)**: Citizens, hustlers, gladiators & enforcers cycle through daily tasks (`CRUISING TO COMPILER FORGE`, `PATCH KIOSK RUN`, `COLOSSEUM BLEACHERS`, etc.), visibly mount colored PS1 Hard-Light Cycles (`10.5–12.5 u/s`) on longer trips, bank into turns, dismount on arrival, and show activity badges.
   - **Colosseum Spectator & Live Betting (`store.ts`, `Arena.tsx`, `HUD.tsx`)**: Pick Red vs Blue Corner exhibition fighters at any Colosseum Gate, stake `50C / 150C / 400C`, watch AI vs AI bouts with `[SPACE]` Broadcast Cam, `[F]` `1×/2×` speed, and `[T]` Crowd Cheer boosts, and settle payouts cleanly.
   - **Version 3.0 Master Overhaul Prompt (`V3_AGENT_PROMPT.md`)**: Ready-to-paste architectural & creative brief for a v3.0 agent overhaul.
-- [ ] **V2 Phase 3 — The Restore Protocol** (Ghost-village restoration, secret Version 0.1 wireframe boss, and Kernel Spire finale).
-- [ ] **Phase C Extension — Crowd Favor & `T` Taunt** (Live Crowd Favor meter & Arena taunt mechanic).
+- [x] **V2 Phase 3 — V3.0 Complete: *The Restore Protocol*** (COMPLETE):
+  - **Pillar 1 — True PS1 Character Polish & Combat Weight (`Gladiator.tsx`, `arena/combat.ts`, `Arena.tsx`, `Ludus.tsx`)**: Sculpted sternum V-plate, collar gorget, shin greave flares, vambrace blades, 4-puff heel-strike footstep dust/sparks, micro impact jitter, directional 4-step hit reactions (`head_snap`, `chest_recoil`, `gut_crunch`, `leg_trip`), and 5 weapon-family `[E]` Execution Finisher choreographies (`gladius_throat`, `spear_impale`, `twin_scissor`, `hammer_flatten`, `trident_pin`).
+  - **Pillar 2 — Curved Data-Highways & Walk-Inside Trophy Sanctuaries (`world/universe.ts`, `world/WorldRenderer.tsx`, `world/layout.ts`, `Stations.tsx`)**: Connected `HIGHWAY_SEGMENTS` across `R = 200` linking all 5 Capitals & 20 Satellites; open-front walk-inside player sanctuaries & Safe Sector Pod displaying mounted Sector Champion Belts, Echo Crystals & weapon racks.
+  - **Pillar 3 — Multi-Agent Traffic, *Fable × RDR2* Regional Stories & Light-Cycle Wingman (`world/citizens.ts`, `rpg/stories.ts`, `Ludus.tsx`, `HUD.tsx`, `store.ts`)**: Right-hand lane traffic yielding & parked Light-Cycles (`stepNpcTrafficYield`); 5 two-stage regional multi-choice stories (`HELP / EXTORT / EXPOSE / DUEL`); recruitable AI Wingman (`[B]`) riding a synchronized colored Light-Cycle and fighting alongside you.
+  - **Pillar 4 — Nemesis League, `[T]` Crowd Favor, Grand Prix Parlays & Echo Core Socketing (`rpg/nemesis.ts`, `rpg/items.ts`, `arena/arenaStore.ts`, `Arena.tsx`, `HUD.tsx`)**: Persistent Capital Nemesis Rivals returning scarred with prosthetic `cyberLimbs` and weapon-adapted counter-gear; `[T]` Crowd Favor meter & Overclock Gift drops; 3.8× Grand Prix 3-Bout Parlays; socketable `ECHO_CORES` (`volt_arc`, `frame_freeze`, `cycle_siphon`, `corrupt_bleed`) imbue weapons visually & mechanically.
+  - **Pillar 5 — Dynamic Biome Weather, Adaptive Synthwave Score & *The Restore Protocol* Finale (`world/BiomeWeather.tsx`, `art/sfx.ts`, `WorldRenderer.tsx`, `HUD.tsx`, `store.ts`)**: 5 biome weather systems (acid data-rain + lightning, crystal snow, rising embers, neon spores, golden spire auroras), procedural WebAudio synthwave tracker (`SYNTH: ON/OFF`), secret Version 0.1 Wireframe Boss (`PROTO_0.1.WIRE` unlocking `V0.1 WIRE-BLADE`), and the Kernel Spire `GARBAGE_COLLECTOR_PRIME.SYS` finale visibly transforming Ghost-Villages into emerald sanctuaries (`RESTORE`) or boosting empire rents +50% (`SOVEREIGN`).
 - [x] **Standalone Mac App (`BONEYARD.app` & `.dmg`)** — Built via Tauri (`src-tauri/Cargo.toml` `[profile.release.build-override] strip = false`).
 - [ ] **Phase E — Live Training Yard Sparring**.
 

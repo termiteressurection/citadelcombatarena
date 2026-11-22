@@ -1362,14 +1362,16 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
         hp !== hud.hp || st !== hud.st || !samePlayerLimbs || !sameEnemies ||
         hud.maxHp !== p.maxHp || shown !== hud.phase || lockedName !== hud.lockedName ||
         p.comboStep !== hud.combo || executeReady !== hud.executeReady ||
-        p.guardHeight !== hud.stance || armed !== hud.armed
+        p.guardHeight !== hud.stance || armed !== hud.armed ||
+        Math.round(w.crowdFavor) !== hud.crowdFavor ||
+        Math.abs((hud.tauntCd ?? 0) - w.tauntCd) > 0.25
       ) {
         hud.set({
           hp, st, maxHp: p.maxHp, maxSt: p.maxStamina,
           playerLimbs: samePlayerLimbs ? hud.playerLimbs : playerLimbs,
           enemies: sameEnemies ? hud.enemies : enemies,
           phase: shown, lockedName, combo: p.comboStep, executeReady,
-          stance: p.guardHeight, armed, tauntCd: Number(w.tauntCd.toFixed(1)),
+          stance: p.guardHeight, armed, crowdFavor: Math.round(w.crowdFavor), tauntCd: Number(w.tauntCd.toFixed(1)),
         });
       }
     }

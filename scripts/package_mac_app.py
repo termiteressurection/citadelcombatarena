@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
@@ -67,12 +68,13 @@ def refresh_launch_services(app_path):
         subprocess.run([LSREGISTER, "-f", app_path], check=False)
 
 
-def clear_webkit_cache():
-    """Wipe stale WebKit asset cache while keeping localStorage save data under ~/Library/WebKit/com.boneyard.game/WebsiteData."""
-    cache_dir = os.path.expanduser("~/Library/Caches/com.boneyard.game")
-    if os.path.exists(cache_dir):
-        print(f"[*] Clearing stale WebKit asset cache: {cache_dir}")
-        shutil.rmtree(cache_dir, ignore_errors=True)
+def ensure_game_not_running():
+    """Avoid replacing an app bundle while an instance is running."""
+    processes = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
+    for line in processes.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and "/BONEYARD.app/Contents/MacOS/boneyard" in parts[1]:
+            raise RuntimeError(f"BONEYARD is running (PID {parts[0]}). Quit it before deploying.")
 
 
 def verify_embedded_js(app_path, expected_js_names):
@@ -109,9 +111,7 @@ def package_boneyard_mac_app(deploy_only=False):
 
     expected_js_names = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(repo_dir, "dist/assets/index-*.js")))]
 
-    # Terminate running instance and wipe stale WebKit cache (keeping WebsiteData save intact)
-    subprocess.run(["pkill", "-x", "boneyard"], check=False)
-    clear_webkit_cache()
+    ensure_game_not_running()
 
     # 2. Sign the source bundle
     identity = get_signing_identity()
@@ -129,11 +129,22 @@ def package_boneyard_mac_app(deploy_only=False):
         target_dir = os.path.dirname(target_app)
         if not os.path.exists(target_dir):
             continue
-        if os.path.exists(target_app):
-            shutil.rmtree(target_app)
-        shutil.copytree(tauri_app_src, target_app, symlinks=True)
-        sign_app(target_app, entitlements_path, identity)
-        clean_quarantine(target_app)
+        with tempfile.TemporaryDirectory(prefix=".boneyard-deploy-", dir=target_dir) as staging:
+            staged_app = os.path.join(staging, "BONEYARD.app")
+            backup = os.path.join(staging, "previous.app")
+            shutil.copytree(tauri_app_src, staged_app, symlinks=True)
+            sign_app(staged_app, entitlements_path, identity)
+            clean_quarantine(staged_app)
+            verify_embedded_js(staged_app, expected_js_names)
+            had_previous = os.path.exists(target_app)
+            if had_previous:
+                os.rename(target_app, backup)
+            try:
+                os.rename(staged_app, target_app)
+            except OSError:
+                if had_previous:
+                    os.rename(backup, target_app)
+                raise
         refresh_launch_services(target_app)
         verify_embedded_js(target_app, expected_js_names)
 

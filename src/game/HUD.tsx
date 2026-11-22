@@ -12,16 +12,19 @@ import { boonById } from './arena/boons';
 import { type LimbKey } from './arena/combat';
 import { LADDER, LOOKS } from './arena/run';
 import {
-  BODIES, CAPES, HELMS, OFFHANDS, WEAPONS, itemById, resolveLoadout, type GearSlot,
+  BODIES, CAPES, ECHO_CORES, HELMS, OFFHANDS, WEAPONS, itemById, resolveLoadout, type GearSlot,
 } from './rpg/items';
 import {
   CONSUMABLES, MAX_FLASKS, STAT_INFO, STAT_KEYS, fameRankOf, nextFameRankOf, xpForNextLevel,
 } from './rpg/stats';
 import { generateDailyQuests, generateFightCards } from './rpg/quests';
+import { COMPANIONS, REGIONAL_STORIES, activeStageOf } from './rpg/stories';
+import { sfx } from './art/sfx';
 
 function TopRightControls() {
   const el = useRef<HTMLDivElement>(null);
   const { ps1Mode, togglePs1Mode } = useGame();
+  const [synthOn, setSynthOn] = useState(() => sfx.isMusicEnabled());
   useEffect(() => {
     let frames = 0, last = performance.now(), raf = 0;
     const loop = (now: number) => {
@@ -36,7 +39,15 @@ function TopRightControls() {
     return () => cancelAnimationFrame(raf);
   }, []);
   return (
-    <div style={{ position: 'absolute', top: 14, right: 18, display: 'flex', gap: 10, alignItems: 'center' }}>
+    <div style={{ position: 'absolute', top: 14, right: 18, display: 'flex', gap: 8, alignItems: 'center' }}>
+      <button
+        className="clickable btn"
+        style={{ padding: '4px 10px', fontSize: 11, letterSpacing: '.1em', color: synthOn ? '#3ff0ff' : '#8c81a8', borderColor: synthOn ? '#3ff0ff' : '#6e5a88' }}
+        onClick={() => setSynthOn(sfx.toggleMusic())}
+        title="Toggle adaptive PS1 synthwave soundtrack"
+      >
+        SYNTH: {synthOn ? 'ON' : 'OFF'}
+      </button>
       <button
         className="clickable btn"
         style={{ padding: '4px 10px', fontSize: 11, letterSpacing: '.12em', color: ps1Mode ? '#4dffa0' : '#a78bfa', borderColor: ps1Mode ? '#4dffa0' : '#6e5a88' }}
@@ -199,6 +210,18 @@ function TownStatusStrip() {
             onClick={() => g.openPanel(g.panel === 'locker' ? null : 'locker')}
           >
             {g.statPoints > 0 ? `[C] +${g.statPoints} SPECS!` : '[C] GEAR & SPECS'}
+          </button>
+          <button
+            className="clickable btn"
+            style={{
+              gridColumn: 'span 2',
+              width: '100%', padding: '4px 6px', fontSize: 10, letterSpacing: '.07em',
+              borderColor: g.activeCompanionId ? '#4dffa0' : '#6e5a88',
+              color: g.activeCompanionId ? '#4dffa0' : '#a99dc4',
+            }}
+            onClick={() => g.toggleCompanion()}
+          >
+            [B] WINGMAN: {g.activeCompanionId ? (COMPANIONS.find((c) => c.id === g.activeCompanionId)?.name ?? 'ACTIVE') : 'DISMISSED'}
           </button>
         </div>
 
@@ -586,6 +609,36 @@ function LockerDrawer() {
           })}
 
           <div style={{ display: 'grid', gap: 5 }}>
+            <div style={{ fontSize: 10, color: '#3ff0ff', letterSpacing: '.14em' }}>
+              ECHO CORE SOCKET ({g.claimedEchoes.length} ECHOES)
+            </div>
+            <div style={{ display: 'grid', gap: 4 }}>
+              {ECHO_CORES.filter((c) => g.ownedCores.includes(c.id)).map((c) => {
+                const eq = (g.loadout.coreId ?? 'none') === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    className="clickable btn"
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '5px 8px', display: 'grid', gap: 2,
+                      borderColor: eq ? c.color : '#4d3f66',
+                      color: eq ? c.color : '#e9e6ff',
+                      background: eq ? '#141a29' : '#0b0816',
+                    }}
+                    onClick={() => g.buyOrEquipCore(c.id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+                      <span>{eq ? '▶ ' : ''}{c.name}</span>
+                      <span>{eq ? 'SOCKETED' : 'EQUIP'}</span>
+                    </div>
+                    <div style={{ fontSize: 9, opacity: 0.78 }}>{c.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 5 }}>
             <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.14em' }}>NEON SHELL TINT</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {LOOKS.filter((l) => g.unlocks.includes(l.id)).map((l) => (
@@ -720,6 +773,43 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
           </div>
         );
       })}
+      {kind === 'smith' && (
+        <div style={{ display: 'grid', gap: 5 }}>
+          <div style={{ fontSize: 10, color: '#3ff0ff', letterSpacing: '.14em', marginTop: 6 }}>
+            ECHO CORE WEAPON SOCKETING ({g.claimedEchoes.length} ECHOES DECRYPTED)
+          </div>
+          {ECHO_CORES.filter((c) => c.id !== 'none').map((c) => {
+            const owned = g.ownedCores.includes(c.id);
+            const eq = (g.loadout.coreId ?? 'none') === c.id;
+            const price = discountedCost(c.cost, g.ownedProperties);
+            const lockedEcho = !owned && g.claimedEchoes.length < c.reqEchoes;
+            const cantAfford = !owned && !lockedEcho && g.denarii < price;
+            return (
+              <button
+                key={c.id}
+                className="clickable btn"
+                disabled={lockedEcho || cantAfford}
+                style={{
+                  width: '100%', textAlign: 'left', padding: '7px 10px', display: 'grid', gap: 2,
+                  borderColor: eq ? '#4dffa0' : c.color,
+                  color: eq ? '#4dffa0' : lockedEcho || cantAfford ? '#8c81a8' : c.color,
+                  opacity: lockedEcho ? 0.52 : cantAfford ? 0.72 : 1,
+                  background: eq ? '#162420' : '#0b0816',
+                }}
+                onClick={() => g.buyOrEquipCore(c.id)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                  <span>{eq ? '▶ ' : ''}{c.name}</span>
+                  <span style={{ fontSize: 10 }}>
+                    {eq ? 'SOCKETED' : owned ? 'OWNED · SOCKET' : lockedEcho ? `REQ ${c.reqEchoes} ECHOES` : `${price}C · FORGE`}
+                  </span>
+                </div>
+                <div style={{ fontSize: 9, color: '#cfc6e8' }}>{c.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div style={{ fontSize: 10, opacity: 0.55, textAlign: 'center', paddingTop: 4 }}>[ESC] to close</div>
     </div>
   );
@@ -931,6 +1021,59 @@ function StationPanel() {
             );
           })}
         </div>
+
+        <div style={{ display: 'grid', gap: 6, borderTop: '1px solid #4d3f66', paddingTop: 8 }}>
+          <div style={{ fontSize: 11, color: '#3ff0ff', letterSpacing: '.16em' }}>
+            REGIONAL MULTI-CHOICE STORIES &amp; WINGMAN SQUAD
+          </div>
+          {REGIONAL_STORIES.map((st) => {
+            const prog = g.storyProgress[st.id];
+            const stage = activeStageOf(st, g.storyProgress);
+            return (
+              <div
+                key={st.id}
+                style={{
+                  padding: '7px 10px', background: '#07050e',
+                  border: `1px solid ${prog?.completed ? '#4dffa0' : st.color}88`,
+                  textAlign: 'left', display: 'grid', gap: 2,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                  <span style={{ color: st.color, fontWeight: 700 }}>{st.title} · {st.biomeTitle}</span>
+                  <span style={{ color: prog?.completed ? '#4dffa0' : '#ffc95c', fontSize: 10 }}>
+                    {prog?.completed ? `RESOLVED (${prog.lastVerb})` : `STAGE ${(prog?.stageIndex ?? 0) + 1}/2`}
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: '#cfc6e8' }}>
+                  {stage ? `Contact: ${stage.speaker} near (${stage.x}, ${stage.z})` : prog?.fallout}
+                </div>
+              </div>
+            );
+          })}
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingTop: 4 }}>
+            {COMPANIONS.map((c) => {
+              const unlocked = g.unlockedCompanions.includes(c.id);
+              const active = g.activeCompanionId === c.id;
+              return (
+                <button
+                  key={c.id}
+                  className="clickable btn"
+                  disabled={!unlocked}
+                  style={{
+                    padding: '5px 8px', fontSize: 10,
+                    borderColor: active ? '#4dffa0' : c.color,
+                    color: active ? '#4dffa0' : unlocked ? c.color : '#6e5a88',
+                    opacity: unlocked ? 1 : 0.45,
+                  }}
+                  onClick={() => g.setActiveCompanion(active ? null : c.id)}
+                >
+                  {active ? '▶ ' : ''}{c.name}{!unlocked ? ' [LOCKED]' : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     ),
 
@@ -1112,6 +1255,59 @@ function StationPanel() {
                 </div>
               );
             })}
+          </div>
+
+          {(() => {
+            const rival = g.nemesisRoster[activeCol.id];
+            if (!rival) return null;
+            const cyberKeys = Object.entries(rival.cyberLimbs).filter(([, on]) => on).map(([k]) => k.toUpperCase());
+            return (
+              <div style={{ padding: '10px 12px', background: '#0e0717', border: `1px solid ${rival.color}`, display: 'grid', gap: 6, textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                  <span style={{ color: rival.color, fontWeight: 700, letterSpacing: '.14em' }}>
+                    NEMESIS RIVAL · {rival.name} (LVL {rival.level})
+                  </span>
+                  <span style={{ color: '#ffc95c', fontSize: 10 }}>
+                    RECORD: {rival.playerWins}W - {rival.rivalWins}L
+                  </span>
+                </div>
+                <div style={{ fontSize: 10, color: '#e9e6ff' }}>"{rival.grudgeBark}"</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 10, color: '#3ff0ff' }}>
+                    {cyberKeys.length > 0 ? `CYBER-LIMBS: ${cyberKeys.join(', ')}` : 'INTACT FRAME'}
+                    {rival.counterLabel ? ` · ${rival.counterLabel}` : ''}
+                  </span>
+                  <button
+                    className="clickable btn"
+                    style={{ padding: '6px 12px', fontSize: 10, borderColor: rival.color, color: rival.color }}
+                    onClick={() => {
+                      useArena.getState().startRun();
+                      g.startNemesisBout(activeCol.id);
+                    }}
+                  >
+                    CHALLENGE NEMESIS (+{220 + rival.level * 65}C)
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={{ padding: '9px 12px', background: '#07050e', border: '1px solid #ffd86688', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <div style={{ textAlign: 'left', display: 'grid', gap: 2 }}>
+              <div style={{ fontSize: 11, color: '#ffd866', fontWeight: 700, letterSpacing: '.12em' }}>GRAND PRIX 3-BOUT PARLAY</div>
+              <div style={{ fontSize: 10, color: '#cfc6e8' }}>Stake {specBet}C into the bracket finals for a 3.8× payout ({Math.round(specBet * 3.8)}C)!</div>
+            </div>
+            <button
+              className="clickable btn"
+              disabled={g.denarii < specBet}
+              style={{ padding: '7px 12px', fontSize: 10, borderColor: '#ffd866', color: '#ffd866', opacity: g.denarii < specBet ? 0.45 : 1, flexShrink: 0 }}
+              onClick={() => {
+                useArena.getState().startRun();
+                g.startGrandPrixParlay(activeCol.id, specBet);
+              }}
+            >
+              PARLAY {specBet}C → {Math.round(specBet * 3.8)}C
+            </button>
           </div>
 
           {(() => {
@@ -1652,6 +1848,115 @@ function MemoryEchoModal() {
   );
 }
 
+function StoryAndProtocolModal() {
+  return <StoryAndProtocolModalContent game={useGame()} />;
+}
+
+export function StoryAndProtocolModalContent({ game: g }: { game: ReturnType<typeof useGame.getState> }) {
+  if (g.scene !== 'ludus') return null;
+
+  const story = REGIONAL_STORIES.find((s) => s.id === g.activeStoryId);
+  const stage = story ? activeStageOf(story, g.storyProgress) : null;
+  if (g.activeStoryId) {
+    return (
+      <div className="panel clickable">
+        <div className="ps1-box" style={{ display: 'grid', gap: 12, width: 'min(600px, 92vw)', maxHeight: '86vh', overflowY: 'auto', textAlign: 'left', borderColor: story?.color ?? '#3ff0ff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #4d3f66', paddingBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, color: '#a99dc4', letterSpacing: '.16em' }}>{story?.biomeTitle} · {stage?.speaker}</div>
+              <h2 className="ps1-heading" style={{ color: story?.color ?? '#3ff0ff', fontSize: 20 }}>{story?.title ?? 'STORY UNAVAILABLE'}</h2>
+            </div>
+            <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.openStoryModal(null)}>CLOSE</button>
+          </div>
+          {story && stage ? (
+            <>
+              <div style={{ color: '#ffc95c', fontSize: 12, fontWeight: 700, letterSpacing: '.1em' }}>{stage.promptTitle}</div>
+              <p style={{ fontSize: 12, lineHeight: 1.5, color: '#e9e6ff' }}>{stage.promptDesc}</p>
+              <div style={{ display: 'grid', gap: 7 }}>
+                {stage.choices.map((choice) => {
+                  const col = choice.verb === 'HELP' ? '#4dffa0' : choice.verb === 'EXTORT' ? '#ffc95c' : choice.verb === 'EXPOSE' ? '#3ff0ff' : '#ff4f6d';
+                  return (
+                    <button
+                      key={choice.verb}
+                      className="clickable btn"
+                      style={{ width: '100%', textAlign: 'left', padding: '9px 12px', display: 'grid', gap: 2, borderColor: col, color: col }}
+                      onClick={() => {
+                        sfx.restoreWave();
+                        g.chooseStoryOption(story.id, choice.verb);
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>{choice.label}</div>
+                      <div style={{ fontSize: 10, color: '#cfc6e8' }}>
+                        +{choice.cyclesDelta}C · {choice.repDelta >= 0 ? `+${choice.repDelta}` : choice.repDelta} Rep · +{choice.xpDelta} XP
+                        {choice.unlockCompanionId ? ' · RECRUITS WINGMAN!' : ''}
+                        {choice.spawnsDuel ? ' · TRIGGERS DUEL!' : ''}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : <p>This story chapter has already resolved.</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (!g.activeSpecialModal) return null;
+  const choice = g.activeSpecialModal === 'restore_choice';
+  const readyRestore = g.championBelts.length >= 5;
+  return (
+    <div className="panel clickable">
+      <div className="ps1-box" style={{ display: 'grid', gap: 12, width: 'min(590px, 92vw)', textAlign: 'left', borderColor: g.activeSpecialModal === 'v01' ? '#4dffa0' : '#ffd866' }}>
+        <h2 className="ps1-heading" style={{ color: g.activeSpecialModal === 'v01' ? '#4dffa0' : '#ffd866', fontSize: 22 }}>
+          {choice ? 'THE RESTORE PROTOCOL · FINAL DECREE' : g.activeSpecialModal === 'v01' ? 'VERSION 0.1 WIREFRAME ANOMALY' : 'THE KERNEL SPIRE · RESTORE TERMINAL'}
+        </h2>
+        {choice ? (
+          <>
+            <p style={{ fontSize: 13, lineHeight: 1.5, color: '#e9e6ff' }}>
+              GARBAGE_COLLECTOR_PRIME.SYS has shattered across the Sovereign Root Grid. Every Ghost-Village and memory shard awaits your command:
+            </p>
+            <button
+              className="clickable btn"
+              style={{ width: '100%', padding: '12px', borderColor: '#4dffa0', color: '#4dffa0', textAlign: 'left' }}
+              onClick={() => { sfx.restoreWave(); g.completeRestoreProtocol('restored'); }}
+            >
+              [RESTORE THE GHOST-VILLAGES] — Execute Restore Protocol &amp; rebuild all 4 Ghost-Villages (+2,000C)
+            </button>
+            <button
+              className="clickable btn"
+              style={{ width: '100%', padding: '12px', borderColor: '#ffd866', color: '#ffd866', textAlign: 'left' }}
+              onClick={() => { sfx.restoreWave(); g.completeRestoreProtocol('sovereign'); }}
+            >
+              [CLAIM SOVEREIGN ROOT] — Turn Sky Beacons gold &amp; boost all Property Rents +50% (+3,000C)
+            </button>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 12, lineHeight: 1.5, color: '#e9e6ff' }}>
+              {g.activeSpecialModal === 'v01'
+                ? 'A flickering wireframe ghost from Boneyard Version 0.1 hums inside this monolith. Best PROTO_0.1.WIRE in the arena to claim +900C, +2 Spec Points, and the V0.1 WIRE-BLADE!'
+                : `Ascend the Kernel Spire to challenge GARBAGE_COLLECTOR_PRIME.SYS. Sector Belts: ${g.championBelts.length}/5 · Echoes: ${g.claimedEchoes.length}/16.${readyRestore ? ' All 5 Sector Belts verified!' : ' Overclock Override active — challenge whenever ready.'}`}
+            </p>
+            <button
+              className="clickable btn"
+              style={{ width: '100%', borderColor: g.activeSpecialModal === 'v01' ? '#4dffa0' : '#ffd866', color: g.activeSpecialModal === 'v01' ? '#4dffa0' : '#ffd866' }}
+              onClick={() => {
+                useArena.getState().startRun();
+                if (g.activeSpecialModal === 'v01') g.startV01BossBout();
+                else g.startRestoreProtocolBout();
+              }}
+            >
+              {g.activeSpecialModal === 'v01' ? 'CHALLENGE PROTO_0.1.WIRE' : 'LAUNCH RESTORE PROTOCOL FINALE'}
+            </button>
+            <button className="clickable btn" onClick={() => g.openSpecialModal(null)}>CLOSE</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Bar({ v, max, color, w = 260 }: { v: number; max: number; color: string; w?: number }) {
   return (
     <div className="ps1-bar-track" style={{ width: w }}>
@@ -1880,10 +2185,10 @@ function ArenaHud() {
         <div
           className="ps1-box"
           style={{
-            position: 'absolute', top: 108, left: '50%', transform: 'translateX(-50%)',
+            position: 'absolute', top: 112, left: '50%', transform: 'translateX(-50%)',
             padding: '4px 14px', fontSize: 11, letterSpacing: '.14em',
             borderColor: a.armed ? '#3ff0ff88' : '#ff4fd8',
-            color: '#e9e6ff', whiteSpace: 'nowrap', display: 'flex', gap: 12,
+            color: '#e9e6ff', whiteSpace: 'nowrap', display: 'flex', gap: 12, alignItems: 'center',
           }}
         >
           <span style={{ color: '#ffc95c', fontWeight: 700 }}>
@@ -1891,6 +2196,9 @@ function ArenaHud() {
           </span>
           <span style={{ color: a.armed ? '#4dffa0' : '#ff4fd8' }}>
             {a.armed ? 'ARMED · [F] THROW' : 'BARE-HANDED · [F] GRAB'}
+          </span>
+          <span style={{ color: '#ffd866' }}>
+            CROWD FAVOR: {a.crowdFavor}% {a.tauntCd > 0 ? `(${a.tauntCd}s)` : '[T] TAUNT'}
           </span>
         </div>
       )}
@@ -1992,6 +2300,7 @@ function ArenaHud() {
           <KeyCap k="RMB/K" label="Launch/Sweep" />
           <KeyCap k="F" label="Throw/Grab" />
           <KeyCap k="E" label="Execute" />
+          <KeyCap k="T" label="Taunt" />
           <KeyCap k="SHIFT" label="Guard/Sidestep" />
           <KeyCap k="H" label="Restore" />
           <KeyCap k="TAB" label="2.5D/Free" />
@@ -2008,6 +2317,10 @@ export function HUD() {
   const activeEchoId = useGame((s) => s.activeEchoId);
   const nearPropertyId = useGame((s) => s.nearPropertyId);
   const nearColosseumId = useGame((s) => s.nearColosseumId);
+  const nearStoryId = useGame((s) => s.nearStoryId);
+  const nearSpecialShrine = useGame((s) => s.nearSpecialShrine);
+  const activeStoryId = useGame((s) => s.activeStoryId);
+  const activeSpecialModal = useGame((s) => s.activeSpecialModal);
   const panel = useGame((s) => s.panel);
   const atlasOpen = useGame((s) => s.atlasOpen);
   const activePropertyId = useGame((s) => s.activePropertyId);
@@ -2019,10 +2332,15 @@ export function HUD() {
   const nearEcho = nearEchoId ? MEMORY_ECHOES.find((e) => e.id === nearEchoId) : null;
   const nearCol = nearColosseumId ? COLOSSEUMS.find((c) => c.id === nearColosseumId) : null;
   const nearProp = nearPropertyId ? PROPERTY_BY_ID.get(nearPropertyId) : null;
-  const modalOpen = Boolean(panel || atlasOpen || activePropertyId || activeEchoId || arrestPrompt || inJail);
+  const nearStory = REGIONAL_STORIES.find((s) => s.id === nearStoryId);
+  const modalOpen = Boolean(panel || atlasOpen || activePropertyId || activeEchoId || activeStoryId || activeSpecialModal || arrestPrompt || inJail);
 
   const hint = nearEcho
     ? { color: nearEcho.color, text: `[ENTER] DECRYPT MEMORY ECHO · ${nearEcho.title}` }
+    : nearStory
+      ? { color: nearStory.color, text: `[ENTER] ${nearStory.title}` }
+    : nearSpecialShrine
+      ? { color: '#ffd866', text: `[ENTER] ${nearSpecialShrine === 'v01' ? 'WIREFRAME ANOMALY' : 'RESTORE TERMINAL'}` }
     : nearCol
       ? { color: nearCol.color, text: `[ENTER] ENTER ${nearCol.name}` }
       : nearProp
@@ -2048,6 +2366,7 @@ export function HUD() {
           <KeyCap k="SHIFT" label="Sprint" />
           <KeyCap k="SPACE" label="Jump/Drift" />
           <KeyCap k="V" label="Cycle" />
+          <KeyCap k="B" label="Wingman" />
           <KeyCap k="TAB" label="Lock" />
           <KeyCap k="E" label="Execute" />
           <KeyCap k="M" label="Atlas" />
@@ -2063,6 +2382,7 @@ export function HUD() {
       <PropertyPanel />
       <WorldAtlasPanel />
       <MemoryEchoModal />
+      <StoryAndProtocolModal />
       <ArenaHud />
     </div>
   );
