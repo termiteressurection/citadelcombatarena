@@ -52,6 +52,12 @@ export interface Pose {
   diveKicking?: boolean;
   /** seconds remaining in Tekken wall-splat state */
   wallSplat?: number;
+  /** 0..1 sprint blend in open-world locomotion */
+  sprint?: number;
+  /** normalized angular yaw turn rate (-1..1) for athletic turn banking */
+  turnRate?: number;
+  /** 0..1 landing impact knee-absorption squash impulse */
+  landSquash?: number;
 }
 
 export interface GladiatorHandle { group: THREE.Group; pose: Pose; setMoving: (speed01: number) => void }
@@ -80,6 +86,7 @@ export const Gladiator = forwardRef<GladiatorHandle, {
     const head = useRef<THREE.Group>(null!);
     const hipL = useRef<THREE.Group>(null!), hipR = useRef<THREE.Group>(null!);
     const kneeL = useRef<THREE.Group>(null!), kneeR = useRef<THREE.Group>(null!);
+    const footL = useRef<THREE.Group>(null!), footR = useRef<THREE.Group>(null!);
     const shL = useRef<THREE.Group>(null!), shR = useRef<THREE.Group>(null!);
     const elL = useRef<THREE.Group>(null!), elR = useRef<THREE.Group>(null!);
     const helmGroup = useRef<THREE.Group>(null!);
@@ -196,45 +203,78 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         lvz = speed.current;
       }
       const moveMag = Math.min(1, Math.hypot(lvx, lvz));
-      phase.current += dt * (3.5 + moveMag * 8.5);
-      const sw = Math.sin(phase.current) * moveMag;
-      const cs = Math.cos(phase.current);
+      const spr = THREE.MathUtils.clamp(p.sprint ?? 0, 0, 1);
+      const turn = THREE.MathUtils.clamp(p.turnRate ?? 0, -1.5, 1.5);
+      const squash = THREE.MathUtils.clamp(p.landSquash ?? 0, 0, 1);
 
-      // Base ready stance targets
-      let pelvisY = 0.92 - 0.11 * st + Math.abs(cs) * 0.05 * moveMag;
-      let rootPitch = 0.08 * lvz;
-      let rootRoll = -lvx * 0.14;
+      phase.current += dt * (moveMag > 0.03 ? (5.2 + moveMag * 5.6 + spr * 2.4) : 2.1);
+      const legPhaseL = phase.current;
+      const legPhaseR = phase.current + Math.PI;
+      const sinL = Math.sin(legPhaseL);
+      const cosL = Math.cos(legPhaseL);
+      const sinR = -sinL;
+      const cosR = -cosL;
+      const sw = sinL * moveMag;
+      const breath = Math.sin(phase.current);
 
-      let upperX = 0.14 * st + 0.12 * lvz;
-      let upperY = -0.28 * st;
-      let upperZ = 0;
-      let headX = -upperX * 0.5;
+      // 2-peak knee biomechanics: swing-through knee fold + stance load-absorption flex
+      const swingFlex = (arg: number) => Math.pow(Math.max(0, Math.cos(arg - 0.35)), 1.35);
+      const loadFlex = (arg: number) => Math.pow(Math.max(0, -Math.cos(arg + 0.55)), 1.6);
 
-      // Left leg (+X), Right leg (-X); orthodox guard has left foot forward
-      let hipLX = -0.22 * st + sw * 0.72;
-      let hipRX = 0.20 * st - sw * 0.72;
-      let hipLZ = 0.08 * st + Math.sin(phase.current) * Math.abs(lvx) * 0.32;
-      let hipRZ = -0.08 * st - Math.sin(phase.current) * Math.abs(lvx) * 0.32;
-      let kneeLX = 0.34 * st + Math.max(0, -cs) * 0.85 * moveMag;
-      let kneeRX = 0.26 * st + Math.max(0, cs) * 0.85 * moveMag;
+      const strideAmp = (0.58 + spr * 0.36) * moveMag;
 
-      // Left arm (+X)
+      // Athletic ready stance (never stiff-legged in idle) + double-peak gait bounce + landing squash
+      let pelvisY =
+        0.90
+        - 0.11 * st
+        - spr * 0.08 * moveMag
+        - squash * 0.24
+        + Math.abs(cosL) * 0.055 * moveMag * (1 - squash)
+        + (1 - moveMag) * (breath * 0.014 - 0.015);
+      let rootPitch = (0.07 + spr * 0.16) * lvz;
+      let rootYaw = -sw * (0.11 + spr * 0.08) + turn * 0.14 * (0.4 + 0.6 * moveMag);
+      let rootRoll = -lvx * 0.14 - turn * 0.24 * (0.35 + 0.65 * moveMag) + sw * 0.045;
+
+      let upperX = 0.14 * st + (0.14 + spr * 0.20) * lvz + squash * 0.28 + (1 - moveMag) * breath * 0.018;
+      let upperY = -0.28 * st - rootYaw * 0.85;
+      let upperZ = turn * 0.08 * moveMag;
+      let headX = -upperX * 0.48;
+
+      // Left leg (+X), Right leg (-X): articulated hips, 2-peak knees & heel/toe ankles
+      let hipLX = (-0.22 * st - 0.06 * (1 - st)) * (1 - moveMag * 0.35) - sw * strideAmp - squash * 0.52;
+      let hipRX = (0.20 * st + 0.08 * (1 - st)) * (1 - moveMag * 0.35) + sw * strideAmp - squash * 0.48;
+      let hipLZ = 0.08 * st + sinL * Math.abs(lvx) * 0.32;
+      let hipRZ = -0.08 * st - sinL * Math.abs(lvx) * 0.32;
+      let kneeLX =
+        (0.17 + 0.20 * st + (1 - st) * breath * 0.03) * (1 - moveMag * 0.45)
+        + (swingFlex(legPhaseL) * (0.94 + spr * 0.42) + loadFlex(legPhaseL) * 0.30) * moveMag
+        + squash * 0.88;
+      let kneeRX =
+        (0.15 + 0.14 * st - (1 - st) * breath * 0.02) * (1 - moveMag * 0.45)
+        + (swingFlex(legPhaseR) * (0.94 + spr * 0.42) + loadFlex(legPhaseR) * 0.30) * moveMag
+        + squash * 0.82;
+      let footLX = (-sinL * 0.34 + Math.max(0, cosL) * 0.18) * moveMag - squash * 0.34;
+      let footRX = (-sinR * 0.34 + Math.max(0, cosR) * 0.18) * moveMag - squash * 0.34;
+
+      // Left arm (+X): contralateral sprint/walk swing against Left Leg
       const parryStance = p.state === 'idle' ? (p.parryReady ?? 0) : 0;
-      let shLX = THREE.MathUtils.lerp(-0.32 * st + sw * 0.3, -0.92, p.block);
+      const idleArmSwingL = sw * (0.44 + spr * 0.38) * (1 - st * 0.45);
+      let shLX = THREE.MathUtils.lerp(-0.32 * st + idleArmSwingL, -0.92, p.block);
       let shLY = THREE.MathUtils.lerp(0, -0.35, p.block);
       let shLZ = THREE.MathUtils.lerp(0.18, 0.05, p.block);
-      let elLX = THREE.MathUtils.lerp(-0.45 - 0.45 * st, -1.25, p.block);
+      let elLX = THREE.MathUtils.lerp(-0.34 - 0.56 * st - (spr * 0.62 + Math.max(0, -sinL) * 0.42) * moveMag, -1.25, p.block);
       if (parryStance > 0.1) {
         shLX = THREE.MathUtils.lerp(shLX, -1.22, parryStance);
         shLY = THREE.MathUtils.lerp(shLY, -0.58, parryStance);
         elLX = THREE.MathUtils.lerp(elLX, -0.92, parryStance);
       }
 
-      // Right arm (-X)
-      let shRX = -0.38 * st - sw * 0.35;
+      // Right arm (-X): contralateral sprint/walk swing against Right Leg
+      const idleArmSwingR = -sw * (0.44 + spr * 0.38) * (1 - st * 0.45);
+      let shRX = -0.38 * st + idleArmSwingR;
       let shRY = 0;
       let shRZ = -0.18 - 0.08 * st;
-      let elRX = -0.45 - 0.35 * st;
+      let elRX = -0.34 - 0.46 * st - (spr * 0.62 + Math.max(0, sinL) * 0.42) * moveMag;
 
       if (st > 0.3 && p.state === 'idle') {
         const gh = p.guardHeight ?? 'mid';
@@ -279,10 +319,19 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         blend = 22;
       } else if (p.diveKicking) {
         rootPitch = -0.95;
-        hipRX = -1.35; kneeRX = 0.05;
-        hipLX = 0.55; kneeLX = 1.15;
+        hipRX = -1.35; kneeRX = 0.05; footRX = 0.45;
+        hipLX = 0.55; kneeLX = 1.15; footLX = 0.35;
         shLX = -0.5; shRX = 0.45;
         blend = 26;
+      } else if ((p.airY ?? 0) > 0.14 && p.state === 'idle') {
+        // Athletic airborne knee-tuck jump
+        rootPitch = 0.14 * lvz;
+        upperX = 0.20;
+        hipLX = -0.78; kneeLX = 1.12; footLX = 0.25;
+        hipRX = -0.32; kneeRX = 1.28; footRX = 0.36;
+        shLX = -0.68; elLX = -0.85;
+        shRX = 0.28; elRX = -0.75;
+        blend = 18;
       } else if ((p.airY ?? 0) > 0.12 && p.state === 'stagger') {
         rootPitch = -0.75;
         upperX = -0.35;
@@ -536,16 +585,17 @@ export const Gladiator = forwardRef<GladiatorHandle, {
         shLX = -0.25; shRX = -0.25;
       }
 
-      // Apply smooth damping to every joint (including vertical airY for jumps, dive-kicks & Tekken juggles)
+      // Apply smooth damping to every joint (including vertical airY, pelvis yaw twist & ankle articulation)
       root.current.position.y = smooth(root.current.position.y, pelvisY + (p.airY ?? 0), blend, dt);
       root.current.rotation.x = smooth(root.current.rotation.x, rootPitch, blend, dt);
+      root.current.rotation.y = smooth(root.current.rotation.y, rootYaw, blend, dt);
       root.current.rotation.z = smooth(root.current.rotation.z, rootRoll, blend, dt);
 
       upper.current.rotation.x = smooth(upper.current.rotation.x, upperX, blend, dt);
       upper.current.rotation.y = smooth(upper.current.rotation.y, upperY, blend, dt);
       upper.current.rotation.z = smooth(upper.current.rotation.z, upperZ, blend, dt);
 
-      head.current.rotation.y = -upper.current.rotation.y * 0.55;
+      head.current.rotation.y = -(upper.current.rotation.y + root.current.rotation.y * 0.45);
       head.current.rotation.x = smooth(head.current.rotation.x, headX, blend, dt);
 
       hipL.current.rotation.x = smooth(hipL.current.rotation.x, hipLX, blend, dt);
@@ -554,6 +604,8 @@ export const Gladiator = forwardRef<GladiatorHandle, {
       hipR.current.rotation.z = smooth(hipR.current.rotation.z, hipRZ, blend, dt);
       kneeL.current.rotation.x = smooth(kneeL.current.rotation.x, kneeLX, blend, dt);
       kneeR.current.rotation.x = smooth(kneeR.current.rotation.x, kneeRX, blend, dt);
+      footL.current.rotation.x = smooth(footL.current.rotation.x, footLX, blend, dt);
+      footR.current.rotation.x = smooth(footR.current.rotation.x, footRX, blend, dt);
 
       shL.current.rotation.x = smooth(shL.current.rotation.x, shLX, blend, dt);
       shL.current.rotation.y = smooth(shL.current.rotation.y, shLY, blend, dt);
@@ -639,39 +691,49 @@ export const Gladiator = forwardRef<GladiatorHandle, {
             <cylinderGeometry args={[0.175, 0.175, 0.07, 6]} />
           </mesh>
 
-          {/* Left leg (+X): faceted thigh, knee guard, shin greave, chunky boot */}
+          {/* Left leg (+X): faceted thigh, articulated bronze knee cap, shin greave, ankle-pivoted boot */}
           <group ref={hipL} position={[0.11, 0, 0]}>
             <mesh position={[0, -0.21, 0]} material={mats.legL}>
               <cylinderGeometry args={[0.09, 0.068, 0.42, 5]} />
             </mesh>
             <group ref={kneeL} position={[0, -0.44, 0]}>
+              <mesh position={[0, 0.01, 0.02]} material={mats.bronze}>
+                <boxGeometry args={[0.096, 0.09, 0.096]} />
+              </mesh>
               <mesh position={[0, -0.20, 0]} material={mats.legL}>
                 <cylinderGeometry args={[0.072, 0.052, 0.40, 5]} />
               </mesh>
               <mesh position={[0, -0.18, 0.038]} material={mats.bronze}>
                 <boxGeometry args={[0.088, 0.25, 0.05]} />
               </mesh>
-              <mesh position={[0, -0.42, 0.035]} material={mats.leather}>
-                <boxGeometry args={[0.10, 0.09, 0.17]} />
-              </mesh>
+              <group ref={footL} position={[0, -0.40, 0]}>
+                <mesh position={[0, -0.02, 0.035]} material={mats.leather}>
+                  <boxGeometry args={[0.10, 0.09, 0.17]} />
+                </mesh>
+              </group>
             </group>
           </group>
 
-          {/* Right leg (-X): faceted thigh, shin greave, chunky boot */}
+          {/* Right leg (-X): faceted thigh, articulated bronze knee cap, shin greave, ankle-pivoted boot */}
           <group ref={hipR} position={[-0.11, 0, 0]}>
             <mesh position={[0, -0.21, 0]} material={mats.legR}>
               <cylinderGeometry args={[0.09, 0.068, 0.42, 5]} />
             </mesh>
             <group ref={kneeR} position={[0, -0.44, 0]}>
+              <mesh position={[0, 0.01, 0.02]} material={mats.bronze}>
+                <boxGeometry args={[0.096, 0.09, 0.096]} />
+              </mesh>
               <mesh position={[0, -0.20, 0]} material={mats.legR}>
                 <cylinderGeometry args={[0.072, 0.052, 0.40, 5]} />
               </mesh>
               <mesh position={[0, -0.18, 0.038]} material={mats.bronze}>
                 <boxGeometry args={[0.088, 0.25, 0.05]} />
               </mesh>
-              <mesh position={[0, -0.42, 0.035]} material={mats.leather}>
-                <boxGeometry args={[0.10, 0.09, 0.17]} />
-              </mesh>
+              <group ref={footR} position={[0, -0.40, 0]}>
+                <mesh position={[0, -0.02, 0.035]} material={mats.leather}>
+                  <boxGeometry args={[0.10, 0.09, 0.17]} />
+                </mesh>
+              </group>
             </group>
           </group>
 

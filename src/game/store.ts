@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { PLAYER_START, type StationId } from './world/layout';
 import { CAPITALS, COLOSSEUMS, SETTLEMENTS, type CapitalId } from './world/universe';
+import { MEMORY_ECHOES } from './world/MemoryWoods';
 import {
   PROPERTY_BY_ID, discountedCost, propertyRenovateCost, propertyRentPayout, propertySellValue,
   reputationDeltaForRent, type OwnedPropertyState, type PropertyMode, type RentRate,
 } from './world/properties';
 import { LOOKS } from './arena/run';
-import { type StanceHeight } from './arena/combat';
+import { type Kind, type StanceHeight } from './arena/combat';
 import { STYLE_IDS, type StyleId } from './arena/styles';
 import {
   BODIES, CAPES, DEFAULT_LOADOUT, HELMS, OFFHANDS, WEAPONS, resolveLoadout,
@@ -20,6 +21,102 @@ import { updateQuestProgress, type BoutSummary, type FightCard, type Quest } fro
 
 export type Scene = 'ludus' | 'arena';
 export type TimeOfDay = 'morning' | 'dusk';
+export type BoutWagerId = 'standard' | 'blood' | 'executioner';
+
+export interface WagerDef {
+  id: BoutWagerId;
+  name: string;
+  desc: string;
+  mult: number;
+  fameMult: number;
+}
+
+export const WAGER_OATHS: Record<BoutWagerId, WagerDef> = {
+  standard: {
+    id: 'standard',
+    name: 'STANDARD PURSE',
+    desc: 'Standard rules. Base 1.0× Cycles purse.',
+    mult: 1.0,
+    fameMult: 1.0,
+  },
+  blood: {
+    id: 'blood',
+    name: 'BLOOD WAGER',
+    desc: 'Win WITHOUT Restore Flasks → 2.2× Cycles & 1.4× Signal.',
+    mult: 2.2,
+    fameMult: 1.4,
+  },
+  executioner: {
+    id: 'executioner',
+    name: "EXECUTIONER'S OATH",
+    desc: 'Win with a Limb Sever / Decapitation → 3.2× Cycles & 1.6× Signal.',
+    mult: 3.2,
+    fameMult: 1.6,
+  },
+};
+
+export interface DeadlockResult {
+  dice: [number, number];
+  sum: number;
+  mode: 'safe' | 'overclock';
+  bet: number;
+  won: boolean;
+  payout: number;
+  net: number;
+  label: string;
+}
+
+export interface EchoHudInfo {
+  id: string;
+  title: string;
+  color: string;
+  dist: number;
+  bearing: string;
+}
+
+export interface SpectatorFighterSpec {
+  name: string;
+  title: string;
+  style: StyleId;
+  kind: Kind;
+  color: string;
+  odds: number;
+}
+
+export interface SpectatorBout {
+  id: string;
+  red: SpectatorFighterSpec;
+  blue: SpectatorFighterSpec;
+  pickedCorner: 'red' | 'blue';
+  wager: number;
+}
+
+const SPECTATOR_ROSTER: { name: string; title: string; style: StyleId; kind: Kind; color: string; baseOdds: number }[] = [
+  { name: 'VECTOR_VIPER.EXE', title: 'Aqueduct Striker', style: 'hoplomachus', kind: 'skirmisher', color: '#3ff0ff', baseOdds: 1.85 },
+  { name: 'NULL_HAMMER.BIN', title: 'Stack Crusher', style: 'executioner', kind: 'brute', color: '#ff4fd8', baseOdds: 1.75 },
+  { name: 'PRISM_SICA.DLL', title: 'Glitch Dancer', style: 'dimachaerus', kind: 'skirmisher', color: '#ff6b6b', baseOdds: 2.05 },
+  { name: 'HEX_NET.SYS', title: 'Cache Trapper', style: 'retiarius', kind: 'skirmisher', color: '#4dffa0', baseOdds: 2.25 },
+  { name: 'CHROME_AEGIS.ROM', title: 'Sector Sentinel', style: 'murmillo', kind: 'brute', color: '#ffc95c', baseOdds: 1.95 },
+  { name: 'KERNEL_FANG.DAT', title: 'Overflow Duelist', style: 'dimachaerus', kind: 'champion', color: '#a78bfa', baseOdds: 2.45 },
+];
+
+export function generateSpectatorMatchup(
+  day: number,
+  colosseumId: CapitalId,
+): { red: SpectatorFighterSpec; blue: SpectatorFighterSpec } {
+  const seed = Math.abs(day * 17 + colosseumId.charCodeAt(0) * 13);
+  const redIdx = seed % SPECTATOR_ROSTER.length;
+  const blueIdx = (seed + 1 + (seed % (SPECTATOR_ROSTER.length - 1))) % SPECTATOR_ROSTER.length;
+  const r = SPECTATOR_ROSTER[redIdx];
+  const b = SPECTATOR_ROSTER[blueIdx === redIdx ? (redIdx + 1) % SPECTATOR_ROSTER.length : blueIdx];
+  const redOdds = Number(Math.max(1.65, Math.min(2.45, r.baseOdds + (b.kind === 'brute' ? 0.15 : 0))).toFixed(2));
+  const blueOdds = Number(Math.max(1.65, Math.min(2.45, b.baseOdds + (r.kind === 'champion' ? 0.2 : 0))).toFixed(2));
+  return {
+    red: { name: r.name, title: r.title, style: r.style, kind: r.kind, color: r.color, odds: redOdds },
+    blue: { name: b.name, title: b.title, style: b.style, kind: b.kind, color: b.color, odds: blueOdds },
+  };
+}
+
 export interface Fallen { name: string; bouts: number; cause: string; date: string }
 
 export interface BoutOutcome {
@@ -30,6 +127,9 @@ export interface BoutOutcome {
   levelsGained: number;
   healerFee: number;
   cause?: string;
+  wagerId?: BoutWagerId;
+  wagerFulfilled?: boolean;
+  beltEarned?: string;
 }
 
 interface Save {
@@ -67,6 +167,8 @@ interface Save {
   reputation: number;
   lastWorldPos: { x: number; z: number };
   activeColosseumId: CapitalId;
+  claimedEchoes: string[];
+  championBelts: CapitalId[];
 }
 
 const KEY_V3 = 'boneyard.save.v3';
@@ -76,6 +178,7 @@ const KEY_V1 = 'boneyard.save.v1';
 const DEFAULT_CAPITALS = CAPITALS.map((c) => c.id);
 const VALID_SETTLEMENTS = new Set(SETTLEMENTS.map((s) => s.id));
 const VALID_CAPITALS = new Set<string>(CAPITALS.map((c) => c.id));
+const VALID_ECHOES = new Set(MEMORY_ECHOES.map((e) => e.id));
 
 const blank = (): Save => ({
   day: 1,
@@ -112,6 +215,8 @@ const blank = (): Save => ({
   reputation: 0,
   lastWorldPos: { x: PLAYER_START.x, z: PLAYER_START.z },
   activeColosseumId: 'cache_city',
+  claimedEchoes: [],
+  championBelts: [],
 });
 
 function mergeOwned(base: string[], raw: unknown, validIds: Set<string>): string[] {
@@ -225,6 +330,8 @@ export function loadSave(): Save {
       activeColosseumId: typeof p.activeColosseumId === 'string' && VALID_CAPITALS.has(p.activeColosseumId)
         ? (p.activeColosseumId as CapitalId)
         : 'cache_city',
+      claimedEchoes: mergeOwned([], p.claimedEchoes, VALID_ECHOES),
+      championBelts: mergeOwned([], p.championBelts, VALID_CAPITALS) as CapitalId[],
     };
   } catch {
     return b;
@@ -263,6 +370,7 @@ interface GameState extends Save {
   panel: StationId | null;
   near: StationId | null;
   selectedCard: FightCard | null;
+  spectatorBout: SpectatorBout | null;
   lastResult: BoutOutcome | null;
   weaponDrawn: boolean;
   onCycle: boolean;
@@ -274,6 +382,10 @@ interface GameState extends Save {
   nearPropertyId: string | null;
   activePropertyId: string | null;
   nearColosseumId: CapitalId | null;
+  nearEchoId: string | null;
+  activeEchoId: string | null;
+  nearestEchoHud: EchoHudInfo | null;
+  activeWager: BoutWagerId;
   nearestBeacon: BeaconHud;
   currentRegionName: string;
   worldPos: { x: number; z: number };
@@ -303,7 +415,12 @@ interface GameState extends Save {
   setNearProperty: (id: string | null) => void;
   openPropertyPanel: (id: string | null) => void;
   setNearColosseum: (id: CapitalId | null) => void;
-  setWorldTelemetry: (t: { beacon: BeaconHud; regionName: string; x: number; z: number }) => void;
+  setNearEcho: (id: string | null) => void;
+  claimMemoryEcho: (id: string) => boolean;
+  closeEchoModal: () => void;
+  setActiveWager: (w: BoutWagerId) => void;
+  playDeadlockDice: (bet: number, mode: 'safe' | 'overclock') => DeadlockResult | null;
+  setWorldTelemetry: (t: { beacon: BeaconHud; regionName: string; x: number; z: number; nearestEcho?: EchoHudInfo | null }) => void;
   buyProperty: (id: string) => boolean;
   setPropertyMode: (id: string, mode: PropertyMode) => void;
   setPropertyRentRate: (id: string, rate: RentRate) => void;
@@ -336,6 +453,8 @@ interface GameState extends Save {
   claimQuest: (id: string) => boolean;
   sleepNextDay: () => void;
   startCardBout: (card: FightCard) => void;
+  startSpectatorBout: (red: SpectatorFighterSpec, blue: SpectatorFighterSpec, pickedCorner: 'red' | 'blue', wager: number) => boolean;
+  settleSpectatorBout: (winnerCorner: 'red' | 'blue') => BoutOutcome;
   settleBout: (summary: BoutSummary & { card: FightCard | null; cause?: string }) => BoutOutcome;
   buyLook: (id: string) => boolean;
   equipLook: (id: string) => void;
@@ -407,6 +526,8 @@ export const useGame = create<GameState>((set, get) => {
       reputation: s.reputation,
       lastWorldPos: s.lastWorldPos,
       activeColosseumId: s.activeColosseumId,
+      claimedEchoes: s.claimedEchoes,
+      championBelts: s.championBelts,
     };
     try { localStorage.setItem(KEY_V3, JSON.stringify(payload)); } catch { /* storage unavailable */ }
   };
@@ -427,6 +548,7 @@ export const useGame = create<GameState>((set, get) => {
     panel: null,
     near: null,
     selectedCard: null,
+    spectatorBout: null,
     lastResult: null,
     weaponDrawn: false,
     onCycle: false,
@@ -438,6 +560,10 @@ export const useGame = create<GameState>((set, get) => {
     nearPropertyId: null,
     activePropertyId: null,
     nearColosseumId: null,
+    nearEchoId: null,
+    activeEchoId: null,
+    nearestEchoHud: null,
+    activeWager: 'standard',
     nearestBeacon: defaultBeacon,
     currentRegionName: 'CACHE CITY (/DEV/NULL)',
     worldPos: { x: PLAYER_START.x, z: PLAYER_START.z },
@@ -450,8 +576,18 @@ export const useGame = create<GameState>((set, get) => {
     streetCallout: null,
     streetVitals: { hp: 100, maxHp: 100, st: 100, maxSt: 100 },
     setNear: (near) => { if (get().near !== near) set({ near }); },
-    openPanel: (panel) => set({ panel, activePropertyId: null, atlasOpen: false }),
-    setScene: (scene) => set({ scene, panel: null, near: null, arrestPrompt: null, activePropertyId: null, atlasOpen: false, onCycle: false }),
+    openPanel: (panel) => set({ panel, activePropertyId: null, atlasOpen: false, activeEchoId: null }),
+    setScene: (scene) => set((s) => ({
+      scene,
+      panel: null,
+      near: null,
+      arrestPrompt: null,
+      activePropertyId: null,
+      atlasOpen: false,
+      activeEchoId: null,
+      onCycle: false,
+      spectatorBout: scene === 'ludus' ? null : s.spectatorBout,
+    })),
     togglePs1Mode: () => { set({ ps1Mode: !get().ps1Mode }); save(); },
     setWeaponDrawn: (weaponDrawn) => set((s) => ({ weaponDrawn, onCycle: weaponDrawn ? false : s.onCycle })),
     toggleWeaponDrawn: () => set((s) => {
@@ -510,7 +646,66 @@ export const useGame = create<GameState>((set, get) => {
     setNearProperty: (nearPropertyId) => { if (get().nearPropertyId !== nearPropertyId) set({ nearPropertyId }); },
     openPropertyPanel: (activePropertyId) => set({ activePropertyId, panel: null, atlasOpen: false }),
     setNearColosseum: (nearColosseumId) => { if (get().nearColosseumId !== nearColosseumId) set({ nearColosseumId }); },
-    setWorldTelemetry: ({ beacon, regionName, x, z }) => set({ nearestBeacon: beacon, currentRegionName: regionName, worldPos: { x, z } }),
+    setNearEcho: (nearEchoId) => { if (get().nearEchoId !== nearEchoId) set({ nearEchoId }); },
+    claimMemoryEcho: (id) => {
+      const s = get();
+      const echo = MEMORY_ECHOES.find((e) => e.id === id);
+      if (!echo || s.claimedEchoes.includes(id)) return false;
+      const lv = applyXp(s.level, s.xp, s.statPoints + 1, echo.rewardXp);
+      const nextWeapons = echo.bonusWeaponId && !s.ownedWeapons.includes(echo.bonusWeaponId)
+        ? [...s.ownedWeapons, echo.bonusWeaponId]
+        : s.ownedWeapons;
+      const bonusWeaponName = echo.bonusWeaponId ? WEAPONS.find((w) => w.id === echo.bonusWeaponId)?.name : null;
+      set({
+        denarii: s.denarii + echo.rewardCycles,
+        fame: s.fame + 35,
+        glory: s.glory + 35,
+        level: lv.level,
+        xp: lv.xp,
+        statPoints: lv.statPoints,
+        ownedWeapons: nextWeapons,
+        claimedEchoes: [...s.claimedEchoes, id],
+        activeEchoId: id,
+        nearEchoId: null,
+        panel: null,
+        activePropertyId: null,
+        atlasOpen: false,
+        streetToast: {
+          speaker: `MEMORY ECHO DECRYPTED (${s.claimedEchoes.length + 1}/${MEMORY_ECHOES.length})`,
+          text: `${echo.title}: +${echo.rewardCycles}C · +1 Spec Pt${bonusWeaponName ? ` · UNLOCKED ${bonusWeaponName}!` : ''}`,
+          color: echo.color,
+          id: ++toastId,
+        },
+      });
+      save();
+      return true;
+    },
+    closeEchoModal: () => set({ activeEchoId: null }),
+    setActiveWager: (activeWager) => set({ activeWager }),
+    playDeadlockDice: (bet, mode) => {
+      const s = get();
+      const wager = Math.floor(bet);
+      if (!Number.isFinite(wager) || wager <= 0 || wager > s.denarii) return null;
+      const d1 = 1 + Math.floor(Math.random() * 6);
+      const d2 = 1 + Math.floor(Math.random() * 6);
+      const sum = d1 + d2;
+      const won = mode === 'overclock' ? (sum >= 10 || d1 === d2) : sum >= 8;
+      const mult = mode === 'overclock' ? 3.5 : 2.2;
+      const payout = won ? Math.round(wager * mult) : 0;
+      const net = payout - wager;
+      const label = won
+        ? (mode === 'overclock' && d1 === d2 ? `DOUBLES JACKPOT [${d1}+${d2}]!` : `SYSTEM HIT [${d1}+${d2}=${sum}]!`)
+        : `SEGFAULT [${d1}+${d2}=${sum}]`;
+      set({ denarii: Math.max(0, s.denarii + net) });
+      save();
+      return { dice: [d1, d2], sum, mode, bet: wager, won, payout, net, label };
+    },
+    setWorldTelemetry: ({ beacon, regionName, x, z, nearestEcho }) => set((cur) => ({
+      nearestBeacon: beacon,
+      currentRegionName: regionName,
+      worldPos: { x, z },
+      nearestEchoHud: nearestEcho === undefined ? cur.nearestEchoHud : nearestEcho,
+    })),
     buyProperty: (id) => {
       const s = get();
       const def = PROPERTY_BY_ID.get(id);
@@ -826,6 +1021,7 @@ export const useGame = create<GameState>((set, get) => {
     startCardBout: (card) => {
       set({
         selectedCard: card,
+        spectatorBout: null,
         lastResult: null,
         scene: 'arena',
         panel: null,
@@ -837,19 +1033,103 @@ export const useGame = create<GameState>((set, get) => {
       save();
     },
 
+    startSpectatorBout: (red, blue, pickedCorner, wager) => {
+      const s = get();
+      const bet = Math.floor(wager);
+      if (!Number.isFinite(bet) || bet <= 0 || bet > s.denarii) return false;
+      set({
+        denarii: s.denarii - bet,
+        spectatorBout: {
+          id: `spec-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+          red,
+          blue,
+          pickedCorner,
+          wager: bet,
+        },
+        selectedCard: null,
+        lastResult: null,
+        scene: 'arena',
+        panel: null,
+        near: null,
+        activePropertyId: null,
+        atlasOpen: false,
+        activeEchoId: null,
+        onCycle: false,
+      });
+      save();
+      return true;
+    },
+
+    settleSpectatorBout: (winnerCorner) => {
+      const s = get();
+      const sb = s.spectatorBout;
+      if (!sb) {
+        const empty: BoutOutcome = { victory: false, denariiDelta: 0, fameDelta: 0, xpEarned: 0, levelsGained: 0, healerFee: 0 };
+        set({ lastResult: empty });
+        return empty;
+      }
+      const picked = sb.pickedCorner === 'red' ? sb.red : sb.blue;
+      const winnerSpec = winnerCorner === 'red' ? sb.red : sb.blue;
+      const loserSpec = winnerCorner === 'red' ? sb.blue : sb.red;
+      const won = winnerCorner === sb.pickedCorner;
+      const payout = won ? Math.round(sb.wager * picked.odds) : 0;
+      const xpEarned = 25;
+      const fameGain = won ? 15 : 0;
+      const lv = applyXp(s.level, s.xp, s.statPoints, xpEarned);
+      const outcome: BoutOutcome = {
+        victory: won,
+        denariiDelta: won ? payout - sb.wager : -sb.wager,
+        fameDelta: fameGain,
+        xpEarned,
+        levelsGained: lv.levelsGained,
+        healerFee: 0,
+        cause: `${winnerSpec.name} defeated ${loserSpec.name}`,
+      };
+      set({
+        denarii: s.denarii + payout,
+        fame: s.fame + fameGain,
+        glory: s.glory + fameGain,
+        level: lv.level,
+        xp: lv.xp,
+        statPoints: lv.statPoints,
+        lastResult: outcome,
+      });
+      save();
+      return outcome;
+    },
+
     settleBout: (summary) => {
       const s = get();
       const gear = resolveLoadout(s.loadout);
       const updatedQuests = updateQuestProgress(s.activeQuests, summary);
       const bonusCombatXp = summary.parries * 8 + summary.armorsBroken * 5 + summary.limbsSevered * 4;
+      const wagerDef = WAGER_OATHS[s.activeWager];
 
       if (summary.victory) {
-        const baseD = summary.card?.denarii ?? Math.max(40, summary.kills * 35);
+        const wagerFulfilled =
+          s.activeWager === 'standard'
+            ? true
+            : s.activeWager === 'blood'
+              ? !summary.usedFlask
+              : summary.limbsSevered >= 1;
+        const cMul = wagerFulfilled ? wagerDef.mult : 1.0;
+        const fMul = wagerFulfilled ? wagerDef.fameMult : 1.0;
+
+        const isTier4 = summary.card?.tier === 4;
+        const isNewBelt = Boolean(isTier4 && !s.championBelts.includes(s.activeColosseumId));
+        const beltName = isNewBelt
+          ? (COLOSSEUMS.find((c) => c.id === s.activeColosseumId)?.name ?? s.activeColosseumId)
+          : undefined;
+        const beltBonus = isNewBelt ? 400 : 0;
+
+        const baseD = Math.round((summary.card?.denarii ?? Math.max(40, summary.kills * 35)) * cMul) + beltBonus;
         const baseX = summary.card?.xp ?? Math.max(45, summary.kills * 35);
         const baseF = summary.card?.fame ?? Math.max(25, summary.kills * 20);
-        const fameGain = Math.round(baseF * gear.fameMul);
+        const fameGain = Math.round(baseF * gear.fameMul * fMul);
         const xpEarned = baseX + bonusCombatXp;
-        const lv = applyXp(s.level, s.xp, s.statPoints, xpEarned);
+        const lv = applyXp(s.level, s.xp, s.statPoints + (isNewBelt ? 1 : 0), xpEarned);
+        const nextBelts = isNewBelt ? [...s.championBelts, s.activeColosseumId] : s.championBelts;
+
         const outcome: BoutOutcome = {
           victory: true,
           denariiDelta: baseD,
@@ -857,6 +1137,9 @@ export const useGame = create<GameState>((set, get) => {
           xpEarned,
           levelsGained: lv.levelsGained,
           healerFee: 0,
+          wagerId: s.activeWager,
+          wagerFulfilled,
+          beltEarned: beltName,
         };
         set({
           denarii: s.denarii + baseD,
@@ -866,7 +1149,9 @@ export const useGame = create<GameState>((set, get) => {
           xp: lv.xp,
           statPoints: lv.statPoints,
           wins: s.wins + 1,
-          champions: s.champions + (summary.card?.tier === 4 ? 1 : 0),
+          champions: s.champions + (isTier4 ? 1 : 0),
+          championBelts: nextBelts,
+          activeWager: 'standard',
           timeOfDay: 'dusk',
           activeQuests: updatedQuests,
           lastResult: outcome,
@@ -888,6 +1173,8 @@ export const useGame = create<GameState>((set, get) => {
         levelsGained: lv.levelsGained,
         healerFee,
         cause: summary.cause,
+        wagerId: s.activeWager,
+        wagerFulfilled: false,
       };
       set({
         denarii: s.denarii - healerFee,
@@ -896,6 +1183,7 @@ export const useGame = create<GameState>((set, get) => {
         xp: lv.xp,
         statPoints: lv.statPoints,
         losses: s.losses + 1,
+        activeWager: 'standard',
         timeOfDay: 'dusk',
         activeQuests: updatedQuests,
         lastResult: outcome,

@@ -8,7 +8,7 @@ import { cloneTex, getPs1Texture, makePs1Material } from './art/ps1Textures';
 import { sfx } from './art/sfx';
 import Starfield from './art/Starfield';
 import {
-  ATTACKS, DODGE_TIME, LIMB_KEYS, NO_INTENT, aiIntent, canExecuteTarget, checkWallSplat, defaultMods, drinkFlask,
+  ATTACKS, DODGE_TIME, KINDS, LIMB_KEYS, NO_INTENT, aiIntent, canExecuteTarget, checkWallSplat, defaultMods, drinkFlask,
   gearOf, makeFighter, parryWindowOf, resolveStrike, spawnDroppedWeapon, stepFighter, stepWeaponProps,
   throwFighterWeapon, tryExecute, tryPickupWeapon, windupOf,
   type ArenaWeaponProp, type Fighter, type HitEvent, type Intent, type LimbKey, type StanceHeight,
@@ -25,7 +25,7 @@ import { buildPlayerMods } from './rpg/stats';
 import type { FightCard } from './rpg/quests';
 import { COLOSSEUMS, type CapitalId } from './world/universe';
 import { consumeMouseLook, keys, pressed } from './input';
-import { useGame } from './store';
+import { useGame, type SpectatorBout } from './store';
 
 const KB_YAW_SENS = 0.06;
 const CAM_DIST = 5.2, CAM_HEIGHT = 3.35 + 1.6, LOOK_AHEAD = 8.8, LOOK_HEIGHT = 1.6 + 1.55, CAM_LERP = 0.18;
@@ -76,6 +76,10 @@ interface ArenaWorld {
   limbsSevered: number;
   usedFlask: boolean;
   weaponFamily: WeaponFamily;
+  spectator: SpectatorBout | null;
+  spectatorSpeed: 1 | 2;
+  spectatorCamMode: 'side' | 'orbit';
+  cheerCd: number;
 }
 
 function resolveQueryStyle(): StyleId | null {
@@ -102,32 +106,54 @@ function newWorld(
   gs: ReturnType<typeof useGame.getState>,
 ): ArenaWorld {
   const queryStyle = resolveQueryStyle();
-  const playerGear = queryStyle ? gearFromStyle(queryStyle) : resolveLoadout(gs.loadout);
-  const weaponFamily = queryStyle ? STYLE_FAMILY[queryStyle] : itemById(WEAPONS, gs.loadout.weaponId).family;
-  const mods = buildPlayerMods(gs.stats, playerGear, gs.dailyBuffs, modsFor(boons));
-  const player = makeFighter(0, 'player', 0, 8, mods, queryStyle ?? gs.style, playerGear);
-  player.stats = { ...player.stats, color: lookColor(gs.look) };
-  if (carry > 0) player.hp = Math.min(player.maxHp, carry + Math.max(0, player.maxHp - carryMax));
-  const fighters = [player];
+  const spectator = gs.spectatorBout;
+  let fighters: Fighter[] = [];
+  let weaponFamily: WeaponFamily = queryStyle ? STYLE_FAMILY[queryStyle] : itemById(WEAPONS, gs.loadout.weaponId).family;
 
-  if (card) {
-    card.enemies.forEach((item, i) => {
-      const eGear = item.loadout ? resolveLoadout(item.loadout) : gearFromStyle(item.style);
-      const e = makeFighter(i + 1, item.kind, (i - (card.enemies.length - 1) / 2) * 4, -8, defaultMods(), item.style, eGear);
-      e.stats = { ...e.stats, name: item.name, color: eGear.color };
-      fighters.push(e);
-    });
+  if (spectator) {
+    const { red, blue } = spectator;
+    const redGear = gearFromStyle(red.style);
+    const blueGear = gearFromStyle(blue.style);
+    const redF = makeFighter(0, red.kind, -4.5, 0, { ...defaultMods(), maxHp: 115 - KINDS[red.kind].hp }, red.style, redGear);
+    redF.team = 'p';
+    redF.yaw = Math.PI / 2;
+    redF.stats = { ...redF.stats, name: red.name, color: red.color, windupMul: 1.35 };
+
+    const blueF = makeFighter(1, blue.kind, 4.5, 0, { ...defaultMods(), maxHp: 115 - KINDS[blue.kind].hp }, blue.style, blueGear);
+    blueF.team = 'e';
+    blueF.yaw = -Math.PI / 2;
+    blueF.stats = { ...blueF.stats, name: blue.name, color: blue.color, windupMul: 1.35 };
+
+    fighters = [redF, blueF];
+    weaponFamily = redGear.visuals.weapon;
   } else {
-    roster.forEach((item, i) => {
-      const e = makeFighter(i + 1, item.kind, (i - (roster.length - 1) / 2) * 4, -8, defaultMods(), item.style);
-      e.stats = { ...e.stats, color: styleOf(item.style).color };
-      fighters.push(e);
-    });
+    const playerGear = queryStyle ? gearFromStyle(queryStyle) : resolveLoadout(gs.loadout);
+    const mods = buildPlayerMods(gs.stats, playerGear, gs.dailyBuffs, modsFor(boons));
+    const player = makeFighter(0, 'player', 0, 8, mods, queryStyle ?? gs.style, playerGear);
+    player.stats = { ...player.stats, color: lookColor(gs.look) };
+    if (carry > 0) player.hp = Math.min(player.maxHp, carry + Math.max(0, player.maxHp - carryMax));
+    fighters = [player];
+
+    if (card) {
+      card.enemies.forEach((item, i) => {
+        const eGear = item.loadout ? resolveLoadout(item.loadout) : gearFromStyle(item.style);
+        const e = makeFighter(i + 1, item.kind, (i - (card.enemies.length - 1) / 2) * 4, -8, defaultMods(), item.style, eGear);
+        e.stats = { ...e.stats, name: item.name, color: eGear.color };
+        fighters.push(e);
+      });
+    } else {
+      roster.forEach((item, i) => {
+        const e = makeFighter(i + 1, item.kind, (i - (roster.length - 1) / 2) * 4, -8, defaultMods(), item.style);
+        e.stats = { ...e.stats, color: styleOf(item.style).color };
+        fighters.push(e);
+      });
+    }
   }
 
   return {
     bout, freed: false, card,
     kills: 0, parries: 0, armorsBroken: 0, limbsSevered: 0, usedFlask: false, weaponFamily,
+    spectator, spectatorSpeed: 1, spectatorCamMode: 'side', cheerCd: 0,
     phys: createArenaWorld(), fighters, ragdolls: [], debris: [],
     shards: new ShardPool(), slashes: new SlashPool(), ghosts: new GhostPool(),
     hitstop: 0, slowMo: 0, shake: 0, fovKick: 0, time: 0, acc: 0,
@@ -349,58 +375,80 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
   w.time += dt; w.phaseT += dt;
   w.shake = Math.max(0, w.shake - dt * 2.4);
   w.fovKick *= Math.exp(-8 * dt);
+  if (w.cheerCd > 0) w.cheerCd = Math.max(0, w.cheerCd - dt);
 
   const player = w.fighters[0];
   const liveFoes = w.fighters.filter((f) => f.team === 'e' && f.state !== 'dead');
 
   const b = w.buf;
-  if (pressed('KeyJ') || pressed('Mouse0')) b.light = 0.22;
-  if (pressed('KeyK') || pressed('Mouse2')) b.heavy = 0.22;
-  if (pressed('ShiftLeft') || pressed('ShiftRight') || pressed('KeyL')) b.parry = 0.16;
-
-  // [F]: Hurl Weapon across screen, Grab Fallen Weapon, or Bare-Handed Shove
-  if (w.phase === 'fight' && player.state !== 'dead' && pressed('KeyF')) {
-    if (!player.weaponDisarmed) {
-      const prop = throwFighterWeapon(player, ++w.nextPropId);
-      if (prop) {
-        w.weaponProps.push(prop);
-        w.propVersion++;
-        sfx.swing(true);
-        hud.set({ callout: { text: 'WEAPON HURLED!', color: '#ffc95c', id: ++w.calloutId } });
-      }
-    } else {
-      const picked = tryPickupWeapon(player, w.weaponProps, 2.6);
-      if (picked) {
-        w.propVersion++;
-        sfx.parry();
-        hud.set({ callout: { text: 'WEAPON RECLAIMED!', color: '#3ff0ff', id: ++w.calloutId } });
-      } else {
-        b.bash = 0.22;
-      }
-    }
-  }
-
-  if (w.lockOn && liveFoes.length > 0) {
-    // Double-tap A / D dash & Tekken W/S sidestep vs Space Jump
-    if (pressed('KeyA') || pressed('ArrowLeft')) {
-      if (w.time - w.lastTapA < 0.24) b.dodge = 0.16;
-      w.lastTapA = w.time;
-    }
-    if (pressed('KeyD') || pressed('ArrowRight')) {
-      if (w.time - w.lastTapD < 0.24) b.dodge = 0.16;
-      w.lastTapD = w.time;
-    }
-    const vertHeld = keys.has('KeyW') || keys.has('ArrowUp') || keys.has('KeyS') || keys.has('ArrowDown');
-    const shiftHeld = keys.has('ShiftLeft') || keys.has('ShiftRight');
-    if (shiftHeld && (pressed('KeyW') || pressed('ArrowUp') || pressed('KeyS') || pressed('ArrowDown'))) {
-      b.dodge = 0.16;
-    }
+  if (w.spectator) {
     if (pressed('Space')) {
-      if (vertHeld) b.dodge = 0.16;
-      else b.jump = 0.16;
+      w.spectatorCamMode = w.spectatorCamMode === 'side' ? 'orbit' : 'side';
+      hud.set({ callout: { text: w.spectatorCamMode === 'orbit' ? 'ORBIT BROADCAST CAM' : '2.5D RINGSIDE CAM', color: '#3ff0ff', id: ++w.calloutId } });
+    }
+    if (pressed('KeyF')) {
+      w.spectatorSpeed = w.spectatorSpeed === 1 ? 2 : 1;
+      hud.set({ callout: { text: `SPEED ${w.spectatorSpeed}×`, color: '#ffc95c', id: ++w.calloutId } });
+    }
+    if (w.phase === 'fight' && w.cheerCd <= 0 && pressed('KeyT')) {
+      const backed = w.spectator.pickedCorner === 'red' ? w.fighters[0] : w.fighters[1];
+      if (backed && backed.state !== 'dead') {
+        w.cheerCd = 2.4;
+        backed.stamina = Math.min(backed.maxStamina, backed.stamina + 28);
+        sfx.parry();
+        w.shards.burst(backed.x, 1.5, backed.z, 24, 8, '#ffc95c');
+        hud.set({ callout: { text: `CROWD ROARS FOR ${backed.stats.name}!`, color: '#ffc95c', id: ++w.calloutId } });
+      }
     }
   } else {
-    if (pressed('Space')) b.dodge = 0.16;
+    if (pressed('KeyJ') || pressed('Mouse0')) b.light = 0.22;
+    if (pressed('KeyK') || pressed('Mouse2')) b.heavy = 0.22;
+    if (pressed('ShiftLeft') || pressed('ShiftRight') || pressed('KeyL')) b.parry = 0.16;
+
+    // [F]: Hurl Weapon across screen, Grab Fallen Weapon, or Bare-Handed Shove
+    if (w.phase === 'fight' && player.state !== 'dead' && pressed('KeyF')) {
+      if (!player.weaponDisarmed) {
+        const prop = throwFighterWeapon(player, ++w.nextPropId);
+        if (prop) {
+          w.weaponProps.push(prop);
+          w.propVersion++;
+          sfx.swing(true);
+          hud.set({ callout: { text: 'WEAPON HURLED!', color: '#ffc95c', id: ++w.calloutId } });
+        }
+      } else {
+        const picked = tryPickupWeapon(player, w.weaponProps, 2.6);
+        if (picked) {
+          w.propVersion++;
+          sfx.parry();
+          hud.set({ callout: { text: 'WEAPON RECLAIMED!', color: '#3ff0ff', id: ++w.calloutId } });
+        } else {
+          b.bash = 0.22;
+        }
+      }
+    }
+
+    if (w.lockOn && liveFoes.length > 0) {
+      // Double-tap A / D dash & Tekken W/S sidestep vs Space Jump
+      if (pressed('KeyA') || pressed('ArrowLeft')) {
+        if (w.time - w.lastTapA < 0.24) b.dodge = 0.16;
+        w.lastTapA = w.time;
+      }
+      if (pressed('KeyD') || pressed('ArrowRight')) {
+        if (w.time - w.lastTapD < 0.24) b.dodge = 0.16;
+        w.lastTapD = w.time;
+      }
+      const vertHeld = keys.has('KeyW') || keys.has('ArrowUp') || keys.has('KeyS') || keys.has('ArrowDown');
+      const shiftHeld = keys.has('ShiftLeft') || keys.has('ShiftRight');
+      if (shiftHeld && (pressed('KeyW') || pressed('ArrowUp') || pressed('KeyS') || pressed('ArrowDown'))) {
+        b.dodge = 0.16;
+      }
+      if (pressed('Space')) {
+        if (vertHeld) b.dodge = 0.16;
+        else b.jump = 0.16;
+      }
+    } else {
+      if (pressed('Space')) b.dodge = 0.16;
+    }
   }
 
   if (w.phase === 'intro' && w.phaseT > 1.6) {
@@ -408,7 +456,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
   }
   const fighting = w.phase === 'fight';
 
-  if (fighting && player.state !== 'dead' && pressed('KeyH')) {
+  if (!w.spectator && fighting && player.state !== 'dead' && pressed('KeyH')) {
     const gs = useGame.getState();
     if (gs.flasks > 0 && drinkFlask(player)) {
       gs.consumeFlaskInBout();
@@ -418,7 +466,7 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     }
   }
 
-  if (fighting && player.state !== 'dead' && pressed('KeyE')) {
+  if (!w.spectator && fighting && player.state !== 'dead' && pressed('KeyE')) {
     const execEv = tryExecute(player, w.fighters);
     if (execEv) {
       sfx.execute();
@@ -501,8 +549,21 @@ function simulate(w: ArenaWorld, dt: number, bout: number) {
     const target = f === player ? locked : nearestFoe(f, w.fighters);
     let intent: Intent = NO_INTENT;
     if (fighting) {
-      if (f === player) intent = playerIntent(w, locked);
-      else if (target) intent = aiIntent(f, target, dt, liveFoes);
+      if (w.spectator && target) {
+        intent = aiIntent(f, target, dt, w.fighters.filter((x) => x.team === f.team && x.state !== 'dead'));
+        if (canExecuteTarget(target) && Math.hypot(target.x - f.x, target.z - f.z) < 2.6 && f.state === 'idle' && Math.random() < 0.05) {
+          const execEv = tryExecute(f, w.fighters);
+          if (execEv) {
+            sfx.execute();
+            w.slowMo = Math.max(w.slowMo, 0.3);
+            onHit(w, execEv);
+          }
+        }
+      } else if (f === player) {
+        intent = playerIntent(w, locked);
+      } else if (target) {
+        intent = aiIntent(f, target, dt, liveFoes);
+      }
     }
     const prev = f.state;
     const prevQueued = f.queuedAtk;
@@ -910,11 +971,11 @@ function Ring() {
 const CROWD_COLORS = ['#3ff0ff', '#ff4fd8', '#ffc95c', '#a78bfa', '#4dffa0'];
 
 const ARENA_THEME: Record<CapitalId, { bg: string; fog: string; hemi: string; key: string; fill: string; brazier: string }> = {
-  cache_city: { bg: '#0d0919', fog: '#170f26', hemi: '#8e82c8', key: '#ffd8a6', fill: '#68c6ff', brazier: '#3ff0ff' },
-  drift_bazaars: { bg: '#180d07', fog: '#28150b', hemi: '#ffb86c', key: '#ffd280', fill: '#ff8a3d', brazier: '#ffc95c' },
-  cold_vaults: { bg: '#090b1d', fog: '#121636', hemi: '#b7b0ff', key: '#eef4ff', fill: '#a78bfa', brazier: '#a78bfa' },
-  rust_citadel: { bg: '#19060b', fog: '#2a0912', hemi: '#ff6b7a', key: '#ff9c78', fill: '#ff3b5c', brazier: '#ff3b5c' },
-  kernel_spire: { bg: '#120f08', fog: '#221c0d', hemi: '#ffe699', key: '#fff7db', fill: '#ffd866', brazier: '#ffd866' },
+  cache_city: { bg: '#151029', fog: '#22173a', hemi: '#aba0e6', key: '#ffe4bd', fill: '#80d4ff', brazier: '#3ff0ff' },
+  drift_bazaars: { bg: '#26140c', fog: '#3b1f10', hemi: '#ffcc8c', key: '#ffe09e', fill: '#ff9d57', brazier: '#ffc95c' },
+  cold_vaults: { bg: '#101430', fog: '#1c224f', hemi: '#cbc4ff', key: '#f5f8ff', fill: '#b8a0ff', brazier: '#a78bfa' },
+  rust_citadel: { bg: '#260a12', fog: '#3d0e1a', hemi: '#ff8591', key: '#ffb091', fill: '#ff5270', brazier: '#ff3b5c' },
+  kernel_spire: { bg: '#1f1a0d', fog: '#332a14', hemi: '#ffefb3', key: '#fffae6', fill: '#ffe07d', brazier: '#ffd866' },
 };
 
 function Stands({ w, accentColor }: { w: ArenaWorld; accentColor: string }) {
@@ -1172,7 +1233,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
     const hud = useArena.getState();
     const timeScale = w.slowMo > 0 ? 0.36 : 1;
     w.slowMo = Math.max(0, w.slowMo - dt);
-    w.acc += dt * timeScale;
+    w.acc += dt * timeScale * (w.spectator ? w.spectatorSpeed : 1);
     while (w.acc >= 1 / 60) {
       w.acc -= 1 / 60;
       const frozen = w.hitstop > 0;
@@ -1240,7 +1301,15 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
       w.settled = true;
       const game = useGame.getState();
       const slayer = w.fighters.find((x) => x.team === 'e' && x.state !== 'dead')?.stats.name ?? 'the sand';
-      if (w.card) {
+      if (w.spectator) {
+        const outcome = game.settleSpectatorBout(w.phase === 'victory' ? 'red' : 'blue');
+        hud.set({
+          phase: outcome.victory ? 'victory' : 'defeat',
+          earned: outcome.denariiDelta,
+          enemies: [],
+          callout: null,
+        });
+      } else if (w.card) {
         const outcome = game.settleBout({
           victory: w.phase === 'victory',
           kills: w.kills,
@@ -1281,10 +1350,17 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
       }
     }
 
-    // Cinematic intro sweep or 2.5D Tekken x Nidhogg Side-Duel / Free cam
+    // Cinematic intro sweep or Spectator Broadcast / 2.5D Side-Duel / Free cam
     const f = w.camFwd;
     playerPos.current.set(p.x, 0, p.z);
-    if (w.lockOn && locked) {
+    if (w.spectator && w.spectatorCamMode === 'orbit') {
+      const target = w.fighters[1] ?? p;
+      const midX = (p.x + target.x) * 0.5;
+      const midZ = (p.z + target.z) * 0.5;
+      const orbAng = w.time * 0.45;
+      desiredCam.current.set(midX + Math.sin(orbAng) * 10.5, 4.2, midZ + Math.cos(orbAng) * 10.5);
+      desiredLook.current.set(midX, 1.35, midZ);
+    } else if (w.lockOn && locked) {
       const midX = (p.x + locked.x) * 0.5;
       const midZ = (p.z + locked.z) * 0.5;
       const dist = Math.hypot(locked.x - p.x, locked.z - p.z);
@@ -1330,10 +1406,10 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
   return (
     <>
       <color attach="background" args={[theme.bg]} />
-      <fog attach="fog" args={[theme.fog, 24, 96]} />
-      <hemisphereLight args={[theme.hemi, '#382218', 0.95]} />
-      <directionalLight position={[18, 30, 14]} intensity={1.35} color={theme.key} />
-      <directionalLight position={[-18, 14, -20]} intensity={0.45} color={theme.fill} />
+      <fog attach="fog" args={[theme.fog, 28, 112]} />
+      <hemisphereLight args={[theme.hemi, '#4a2e22', 1.25]} />
+      <directionalLight position={[18, 30, 14]} intensity={1.68} color={theme.key} />
+      <directionalLight position={[-18, 14, -20]} intensity={0.72} color={theme.fill} />
       <Ps1Sky mood="arena" />
       <Starfield playerPosRef={playerPos} />
       <Ring />
@@ -1356,6 +1432,7 @@ function Scene({ w, bout }: { w: ArenaWorld; bout: number }) {
 export function Arena() {
   const bout = useArena((s) => s.bout);
   const cardId = useGame((s) => s.selectedCard?.id ?? null);
+  const spectatorId = useGame((s) => s.spectatorBout?.id ?? null);
   const [world, setWorld] = useState<ArenaWorld | null>(null);
   useEffect(() => {
     setCurvature(0, 0, 0);
@@ -1389,7 +1466,7 @@ export function Arena() {
       }
       setWorld(null);
     };
-  }, [bout, cardId]);
+  }, [bout, cardId, spectatorId]);
   if (!world || world.freed || world.bout !== bout) return null;
-  return <Scene key={`${world.bout}-${cardId ?? 'run'}`} w={world} bout={world.bout} />;
+  return <Scene key={`${world.bout}-${cardId ?? spectatorId ?? 'run'}`} w={world} bout={world.bout} />;
 }

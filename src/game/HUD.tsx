@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { STATIONS } from './world/layout';
 import { CAPITALS, COLOSSEUMS, SETTLEMENTS } from './world/universe';
+import { MEMORY_ECHOES } from './world/MemoryWoods';
 import {
   PROPERTIES, PROPERTY_BY_ID, discountedCost, ownerShopDiscount, propertyRenovateCost,
   propertyRentPayout, propertySellValue, reputationRankOf,
 } from './world/properties';
-import { useGame } from './store';
+import { generateSpectatorMatchup, useGame, WAGER_OATHS, type DeadlockResult } from './store';
 import { useArena, type LimbHud } from './arena/arenaStore';
 import { boonById } from './arena/boons';
 import { type LimbKey } from './arena/combat';
@@ -62,21 +63,43 @@ function TownStatusStrip() {
 
   return (
     <>
-      {/* Nearest Capital Colosseum Sky-Beacon Compass Pill */}
-      {!g.atlasOpen && !g.panel && !g.activePropertyId && !g.arrestPrompt && (
+      {/* Nearest Capital Colosseum Sky-Beacon + Echo Radar Compass Pills */}
+      {!g.atlasOpen && !g.panel && !g.activePropertyId && !g.arrestPrompt && !g.activeEchoId && (
         <div
-          className="ps1-box"
           style={{
             position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
-            padding: '5px 14px', borderColor: g.nearestBeacon.color,
-            display: 'flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.12em',
-            whiteSpace: 'nowrap',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+            pointerEvents: 'none',
           }}
         >
-          <span style={{ color: g.nearestBeacon.color, fontSize: 14 }}>◆</span>
-          <span style={{ color: '#a99dc4' }}>NEAREST COLOSSEUM</span>
-          <span style={{ color: g.nearestBeacon.color, fontWeight: 700 }}>{g.nearestBeacon.name}</span>
-          <span style={{ color: '#ffc95c' }}>{g.nearestBeacon.dist}m {g.nearestBeacon.bearing}</span>
+          <div
+            className="ps1-box"
+            style={{
+              padding: '5px 14px', borderColor: g.nearestBeacon.color,
+              display: 'flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.12em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ color: g.nearestBeacon.color, fontSize: 14 }}>◆</span>
+            <span style={{ color: '#a99dc4' }}>NEAREST COLOSSEUM</span>
+            <span style={{ color: g.nearestBeacon.color, fontWeight: 700 }}>{g.nearestBeacon.name}</span>
+            <span style={{ color: '#ffc95c' }}>{g.nearestBeacon.dist}m {g.nearestBeacon.bearing}</span>
+          </div>
+          {g.nearestEchoHud && (
+            <div
+              className="ps1-box"
+              style={{
+                padding: '3px 12px', borderColor: g.nearestEchoHud.color,
+                display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, letterSpacing: '.11em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <span style={{ color: g.nearestEchoHud.color }}>◇</span>
+              <span style={{ color: '#a99dc4' }}>ECHO RADAR</span>
+              <span style={{ color: g.nearestEchoHud.color, fontWeight: 700 }}>{g.nearestEchoHud.title}</span>
+              <span style={{ color: '#4dffa0' }}>{g.nearestEchoHud.dist}m {g.nearestEchoHud.bearing}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -113,6 +136,15 @@ function TownStatusStrip() {
           <span style={{ color: rep.color }}>REP: {rep.label}</span>
           <span style={{ color: ownedCount > 0 ? '#4dffa0' : '#a99dc4' }}>
             DEEDS OWNED: {ownedCount}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, letterSpacing: '.09em' }}>
+          <span style={{ color: g.championBelts.length > 0 ? '#ffd866' : '#a99dc4' }}>
+            BELTS: {g.championBelts.length}/{COLOSSEUMS.length}
+          </span>
+          <span style={{ color: g.claimedEchoes.length > 0 ? '#3ff0ff' : '#a99dc4' }}>
+            ECHOES: {g.claimedEchoes.length}/{MEMORY_ECHOES.length}
           </span>
         </div>
 
@@ -205,7 +237,7 @@ function TownStatusStrip() {
         </div>
       </div>
 
-      {!g.panel && !g.arrestPrompt && !g.atlasOpen && !g.activePropertyId && (
+      {!g.panel && !g.arrestPrompt && !g.atlasOpen && !g.activePropertyId && !g.activeEchoId && (
         <div
           className="ps1-box"
           style={{
@@ -264,7 +296,7 @@ function StreetOverlays() {
 
   return (
     <>
-      {(g.streetLockName || g.weaponDrawn) && !g.onCycle && !g.panel && !g.atlasOpen && !g.activePropertyId && (
+      {(g.streetLockName || g.weaponDrawn) && !g.onCycle && !g.panel && !g.atlasOpen && !g.activePropertyId && !g.activeEchoId && (
         <div
           className="ps1-box"
           style={{
@@ -315,7 +347,7 @@ function StreetOverlays() {
         </div>
       )}
 
-      {g.streetExecuteReady && !g.onCycle && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && (
+      {g.streetExecuteReady && !g.onCycle && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && !g.activeEchoId && (
         <div
           className="ps1-box limb-crit"
           style={{
@@ -330,7 +362,7 @@ function StreetOverlays() {
         </div>
       )}
 
-      {g.onCycle && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && (
+      {g.onCycle && !g.panel && !g.arrestPrompt && !g.inJail && !g.atlasOpen && !g.activePropertyId && !g.activeEchoId && (
         <div
           className="ps1-box"
           style={{
@@ -695,6 +727,10 @@ function ShopDrawer({ kind }: { kind: 'smith' | 'armorer' }) {
 
 function StationPanel() {
   const g = useGame();
+  const [diceBet, setDiceBet] = useState(50);
+  const [diceLast, setDiceLast] = useState<DeadlockResult | null>(null);
+  const [specCorner, setSpecCorner] = useState<'red' | 'blue'>('red');
+  const [specBet, setSpecBet] = useState(50);
   if (!g.panel) return null;
 
   if (g.panel === 'locker') return <LockerDrawer />;
@@ -750,6 +786,74 @@ function StationPanel() {
           })}
         </div>
         <p style={{ fontSize: 11 }}>Cycle stimms & rations persist until you Defrag in the Safe Sector Pod.</p>
+
+        {/* DEADLOCK 21 Cyber-Dice Side-Hustle */}
+        <div
+          style={{
+            width: '100%', padding: '10px 12px', background: '#07050e',
+            border: '1px solid #ff4fd888', display: 'grid', gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+            <span style={{ color: '#ff4fd8', fontWeight: 700, letterSpacing: '.14em' }}>DEADLOCK 21 · CYBER-DICE</span>
+            <span style={{ color: '#ffc95c' }}>STAKE: {diceBet}C</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            {[50, 150, 400].map((stake) => (
+              <button
+                key={stake}
+                className="clickable btn"
+                style={{
+                  width: '100%', padding: '5px', fontSize: 10,
+                  borderColor: diceBet === stake ? '#ffc95c' : '#4d3f66',
+                  color: diceBet === stake ? '#ffc95c' : '#cfc6e8',
+                }}
+                onClick={() => setDiceBet(stake)}
+              >
+                {stake} CYCLES
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <button
+              className="clickable btn"
+              disabled={g.denarii < diceBet}
+              style={{
+                width: '100%', padding: '8px 6px', fontSize: 10,
+                borderColor: '#3ff0ff', color: '#3ff0ff',
+                opacity: g.denarii < diceBet ? 0.4 : 1,
+              }}
+              onClick={() => setDiceLast(g.playDeadlockDice(diceBet, 'safe'))}
+            >
+              SAFE ROLL (8+ → 2.2×)
+            </button>
+            <button
+              className="clickable btn"
+              disabled={g.denarii < diceBet}
+              style={{
+                width: '100%', padding: '8px 6px', fontSize: 10,
+                borderColor: '#ff4fd8', color: '#ff4fd8',
+                opacity: g.denarii < diceBet ? 0.4 : 1,
+              }}
+              onClick={() => setDiceLast(g.playDeadlockDice(diceBet, 'overclock'))}
+            >
+              OVERCLOCK (10+ / DBL → 3.5×)
+            </button>
+          </div>
+          {diceLast && (
+            <div
+              style={{
+                padding: '6px 8px', background: '#110b22',
+                border: `1px solid ${diceLast.won ? '#4dffa0' : '#ff4f6d'}`,
+                fontSize: 11, color: diceLast.won ? '#4dffa0' : '#ff6b6b',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}
+            >
+              <span>DICE [{diceLast.dice[0]}][{diceLast.dice[1]}] · {diceLast.label}</span>
+              <span style={{ fontWeight: 700 }}>{diceLast.net >= 0 ? `+${diceLast.net}C` : `${diceLast.net}C`}</span>
+            </div>
+          )}
+        </div>
       </>
     ),
 
@@ -931,50 +1035,166 @@ function StationPanel() {
       </div>
     ),
 
-    gate: (
-      <div style={{ display: 'grid', gap: 10, width: '100%' }}>
-        <div style={{ fontSize: 11, color: gear.color }}>
-          ACTIVE: {gear.name} · HEAVY: {gear.moves.heavy.name} · RESTORES: {g.flasks}/{MAX_FLASKS}
-        </div>
-        <div style={{ display: 'grid', gap: 8 }}>
-          {fightCards.map((card) => {
-            const locked = g.fame < card.reqFame;
-            return (
-              <div
-                key={card.id}
-                style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                  padding: '10px 12px', background: '#07050e',
-                  border: `1px solid ${locked ? '#4d3f66' : card.tier === 4 ? '#ff4fd8' : '#c99b43'}`,
-                  opacity: locked ? 0.55 : 1,
-                }}
-              >
-                <div style={{ textAlign: 'left', display: 'grid', gap: 3 }}>
-                  <div style={{ fontSize: 12, color: card.tier === 4 ? '#ff4fd8' : '#ffc95c', fontWeight: 700 }}>
-                    TIER {card.tier} · {card.title}
-                  </div>
-                  <div style={{ fontSize: 10, color: '#e9e6ff' }}>{card.subtitle}</div>
-                  <div style={{ fontSize: 10, color: '#4dffa0' }}>
-                    {locked ? `Requires ${card.reqFame} Signal (You: ${g.fame})` : `Payout: ${card.denarii}C · ${card.xp} XP · ${card.fame} Signal`}
-                  </div>
-                </div>
-                <button
-                  className="clickable btn"
-                  disabled={locked}
-                  style={{ padding: '7px 14px', fontSize: 11, flexShrink: 0 }}
-                  onClick={() => {
-                    useArena.getState().startRun();
-                    g.startCardBout(card);
+    gate: (() => {
+      const hasBelt = g.championBelts.includes(activeCol.id);
+      const wager = WAGER_OATHS[g.activeWager];
+      return (
+        <div style={{ display: 'grid', gap: 10, width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
+            <span style={{ color: gear.color }}>ACTIVE: {gear.name} · RESTORES: {g.flasks}/{MAX_FLASKS}</span>
+            <span style={{ color: hasBelt ? '#ffd866' : '#a99dc4', fontWeight: 700 }}>
+              {hasBelt ? '★ SECTOR CHAMPION BELT CLAIMED' : 'TIER 4 CROWN: SECTOR CHAMPION BELT (+400C)'}
+            </span>
+          </div>
+
+          <div style={{ padding: '8px 10px', background: '#07050e', border: '1px solid #c99b4366', display: 'grid', gap: 6 }}>
+            <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.14em' }}>HIGH-STAKES WAGER OATH</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+              {(['standard', 'blood', 'executioner'] as const).map((wId) => {
+                const w = WAGER_OATHS[wId];
+                const active = g.activeWager === wId;
+                return (
+                  <button
+                    key={wId}
+                    className="clickable btn"
+                    style={{
+                      width: '100%', padding: '6px 4px', fontSize: 10,
+                      borderColor: active ? '#ffc95c' : '#4d3f66',
+                      color: active ? '#ffc95c' : '#cfc6e8',
+                      background: active ? '#1e1633' : '#0b0816',
+                    }}
+                    onClick={() => g.setActiveWager(wId)}
+                  >
+                    {w.name.split(' ')[0]} · {w.mult}×
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: '#4dffa0' }}>{wager.desc}</div>
+          </div>
+
+          <div style={{ display: 'grid', gap: 8 }}>
+            {fightCards.map((card) => {
+              const locked = g.fame < card.reqFame;
+              const projectedD = Math.round(card.denarii * wager.mult);
+              return (
+                <div
+                  key={card.id}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                    padding: '10px 12px', background: '#07050e',
+                    border: `1px solid ${locked ? '#4d3f66' : card.tier === 4 ? '#ff4fd8' : '#c99b43'}`,
+                    opacity: locked ? 0.55 : 1,
                   }}
                 >
-                  ENTER THE GRID
+                  <div style={{ textAlign: 'left', display: 'grid', gap: 3 }}>
+                    <div style={{ fontSize: 12, color: card.tier === 4 ? '#ff4fd8' : '#ffc95c', fontWeight: 700 }}>
+                      TIER {card.tier} · {card.title}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#e9e6ff' }}>{card.subtitle}</div>
+                    <div style={{ fontSize: 10, color: '#4dffa0' }}>
+                      {locked
+                        ? `Requires ${card.reqFame} Signal (You: ${g.fame})`
+                        : `Payout: ${projectedD}C${wager.mult > 1 ? ` (${wager.mult}×)` : ''} · ${card.xp} XP · ${card.fame} Signal`}
+                    </div>
+                  </div>
+                  <button
+                    className="clickable btn"
+                    disabled={locked}
+                    style={{ padding: '7px 14px', fontSize: 11, flexShrink: 0 }}
+                    onClick={() => {
+                      useArena.getState().startRun();
+                      g.startCardBout(card);
+                    }}
+                  >
+                    ENTER THE GRID
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {(() => {
+            const { red, blue } = generateSpectatorMatchup(g.day, activeCol.id);
+            const chosen = specCorner === 'red' ? red : blue;
+            const potentialWin = Math.round(specBet * chosen.odds);
+            const canBet = g.denarii >= specBet;
+            return (
+              <div style={{ padding: '10px 12px', background: '#07050e', border: '1px solid #3ff0ff88', display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                  <span style={{ color: '#3ff0ff', fontWeight: 700, letterSpacing: '.14em' }}>SPECTATE &amp; BET EXHIBITION BOUT</span>
+                  <span style={{ color: '#ffc95c' }}>YOUR CYCLES: {g.denarii}C</span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {([
+                    { side: 'red' as const, spec: red, cornerLabel: 'RED CORNER' },
+                    { side: 'blue' as const, spec: blue, cornerLabel: 'BLUE CORNER' },
+                  ]).map(({ side, spec, cornerLabel }) => {
+                    const active = specCorner === side;
+                    return (
+                      <button
+                        key={side}
+                        className="clickable btn"
+                        style={{
+                          width: '100%', padding: '8px', textAlign: 'left', display: 'grid', gap: 2,
+                          borderColor: active ? spec.color : '#4d3f66',
+                          background: active ? '#18142b' : '#0b0816',
+                          color: spec.color,
+                        }}
+                        onClick={() => setSpecCorner(side)}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}>
+                          <span>{active ? '▶ ' : ''}{cornerLabel}</span>
+                          <span style={{ color: '#ffc95c', fontWeight: 700 }}>{spec.odds}×</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#e9e6ff', fontWeight: 700 }}>{spec.name}</div>
+                        <div style={{ fontSize: 9, color: '#a99dc4' }}>{spec.style.toUpperCase()} · {spec.title}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                  {[50, 150, 400].map((stake) => (
+                    <button
+                      key={stake}
+                      className="clickable btn"
+                      style={{
+                        width: '100%', padding: '5px', fontSize: 10,
+                        borderColor: specBet === stake ? '#ffc95c' : '#4d3f66',
+                        color: specBet === stake ? '#ffc95c' : '#cfc6e8',
+                      }}
+                      onClick={() => setSpecBet(stake)}
+                    >
+                      STAKE {stake}C
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  className="clickable btn"
+                  disabled={!canBet}
+                  style={{
+                    width: '100%', padding: '9px', fontSize: 11,
+                    borderColor: '#3ff0ff', color: '#3ff0ff',
+                    opacity: canBet ? 1 : 0.45,
+                  }}
+                  onClick={() => {
+                    useArena.getState().startRun();
+                    g.startSpectatorBout(red, blue, specCorner, specBet);
+                  }}
+                >
+                  {canBet
+                    ? `WATCH & WAGER ${specBet}C ON ${chosen.name} (PAYOUT ${potentialWin}C)`
+                    : `NEED ${specBet} CYCLES TO WAGER`}
                 </button>
               </div>
             );
-          })}
+          })()}
         </div>
-      </div>
-    ),
+      );
+    })(),
   };
 
   return (
@@ -1184,7 +1404,7 @@ function WorldAtlasPanel() {
           <div>
             <h1 style={{ fontSize: 22, letterSpacing: '.24em', color: '#3ff0ff' }}>THE UNALLOCATED EXPANSE · ATLAS</h1>
             <div style={{ fontSize: 10, color: '#ffc95c', letterSpacing: '.12em' }}>
-              DISCOVERED SECTORS: {g.discoveredSettlements.length}/{SETTLEMENTS.length} · ACTIVE BEACON: {g.nearestBeacon.name}
+              SECTORS: {g.discoveredSettlements.length}/{SETTLEMENTS.length} · ECHOES: {g.claimedEchoes.length}/{MEMORY_ECHOES.length} · BELTS: {g.championBelts.length}/{COLOSSEUMS.length}
             </div>
           </div>
           <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.setAtlasOpen(false)}>CLOSE</button>
@@ -1262,6 +1482,25 @@ function WorldAtlasPanel() {
                 strokeWidth={1}
               />
             ))}
+
+            {/* 16 Memory Echo Obelisk Markers */}
+            {MEMORY_ECHOES.map((ec) => {
+              const ex = mapCoord(ec.x);
+              const ez = mapCoord(ec.z);
+              const claimed = g.claimedEchoes.includes(ec.id);
+              return (
+                <polygon
+                  key={ec.id}
+                  points={`${ex},${ez - 3.5} ${ex + 3.5},${ez} ${ex},${ez + 3.5} ${ex - 3.5},${ez}`}
+                  fill={claimed ? '#ffd866' : ec.color}
+                  opacity={claimed ? 0.38 : 0.95}
+                  stroke="#05040d"
+                  strokeWidth={0.9}
+                >
+                  <title>{`${ec.title}${claimed ? ' (DECRYPTED)' : ''}`}</title>
+                </polygon>
+              );
+            })}
 
             {/* Live Player Position Cursor */}
             <g>
@@ -1347,6 +1586,67 @@ function WorldAtlasPanel() {
           </div>
         </div>
         <p style={{ fontSize: 10, opacity: 0.55, textAlign: 'center' }}>[M] or [ESC] to close</p>
+      </div>
+    </div>
+  );
+}
+
+function MemoryEchoModal() {
+  const g = useGame();
+  if (!g.activeEchoId) return null;
+  const echo = MEMORY_ECHOES.find((e) => e.id === g.activeEchoId);
+  if (!echo) return null;
+  const bonusWeapon = echo.bonusWeaponId ? WEAPONS.find((w) => w.id === echo.bonusWeaponId) ?? null : null;
+
+  return (
+    <div className="panel clickable">
+      <div
+        className="ps1-box"
+        style={{
+          display: 'grid', gap: 12, width: 'min(540px, 92vw)',
+          borderColor: echo.color, textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${echo.color}55`, paddingBottom: 8 }}>
+          <div>
+            <div style={{ fontSize: 10, color: '#a99dc4', letterSpacing: '.16em' }}>
+              MEMORY ECHO #{echo.index}/{MEMORY_ECHOES.length} · {echo.filename}
+            </div>
+            <h2 className="ps1-heading" style={{ color: echo.color, fontSize: 20, marginTop: 2 }}>{echo.title}</h2>
+          </div>
+          <button className="clickable btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => g.closeEchoModal()}>CLOSE</button>
+        </div>
+
+        <div
+          style={{
+            padding: '12px 14px', background: '#07050e',
+            border: `1px solid ${echo.color}44`, fontSize: 13, lineHeight: 1.55, color: '#e9e6ff',
+          }}
+        >
+          "{echo.transcript}"
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11 }}>
+          <span style={{ padding: '4px 9px', background: '#12221a', border: '1px solid #4dffa0', color: '#4dffa0' }}>
+            +{echo.rewardCycles} CYCLES
+          </span>
+          <span style={{ padding: '4px 9px', background: '#101d2c', border: '1px solid #3ff0ff', color: '#3ff0ff' }}>
+            +{echo.rewardXp} XP · +1 SPEC PT
+          </span>
+          {bonusWeapon && (
+            <span style={{ padding: '4px 9px', background: '#26142e', border: '1px solid #ffc95c', color: '#ffc95c', fontWeight: 700 }}>
+              RELIC UNLOCKED: {bonusWeapon.name}
+            </span>
+          )}
+        </div>
+
+        <button
+          className="clickable btn"
+          style={{ width: '100%', borderColor: echo.color, color: echo.color }}
+          onClick={() => g.closeEchoModal()}
+        >
+          [ENTER / ESC] CLOSE ARCHIVE
+        </button>
       </div>
     </div>
   );
@@ -1473,7 +1773,7 @@ function KeyCap({ k, label }: { k: string; label: string }) {
 }
 
 function ArenaHud() {
-  const { scene, setScene, loadout, flasks, dailyBuffs, selectedCard, lastResult, activeQuests, activeColosseumId } = useGame();
+  const { scene, setScene, loadout, flasks, dailyBuffs, selectedCard, spectatorBout, lastResult, activeQuests, activeColosseumId } = useGame();
   const a = useArena();
   if (scene !== 'arena') return null;
   const activeCol = COLOSSEUMS.find((c) => c.id === activeColosseumId) ?? COLOSSEUMS[0];
@@ -1485,6 +1785,8 @@ function ArenaHud() {
   };
 
   const ended = a.phase === 'victory' || a.phase === 'defeat' || a.phase === 'champion';
+  const backedFighter = spectatorBout ? (spectatorBout.pickedCorner === 'red' ? spectatorBout.red : spectatorBout.blue) : null;
+  const specPayout = spectatorBout && backedFighter ? Math.round(spectatorBout.wager * backedFighter.odds) : 0;
 
   return (
     <>
@@ -1493,8 +1795,12 @@ function ArenaHud() {
           <LimbDoll limbs={a.playerLimbs} size={58} />
           <div style={{ display: 'grid', gap: 5 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 11, letterSpacing: '.14em' }}>
-              <span style={{ color: gear.color }}>{gear.name}</span>
-              <span style={{ color: '#ffc95c' }}>{selectedCard ? selectedCard.title : `BOUT ${a.bout}/${LADDER.length}`}</span>
+              <span style={{ color: spectatorBout ? spectatorBout.red.color : gear.color }}>
+                {spectatorBout ? `${spectatorBout.red.name} · RED` : gear.name}
+              </span>
+              <span style={{ color: '#ffc95c' }}>
+                {spectatorBout ? 'EXHIBITION' : selectedCard ? selectedCard.title : `BOUT ${a.bout}/${LADDER.length}`}
+              </span>
             </div>
             <Bar v={a.hp} max={a.maxHp} color="#ff4f6d" w={190} />
             <Bar v={a.st} max={a.maxSt} color="#4dffa0" w={155} />
@@ -1556,7 +1862,21 @@ function ArenaHud() {
       </div>
 
       <CalloutFlash />
-      {a.phase === 'fight' && (
+      {spectatorBout && backedFighter && (
+        <div
+          className="ps1-box"
+          style={{
+            position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+            padding: '4px 14px', fontSize: 11, letterSpacing: '.12em',
+            borderColor: '#ffc95c', color: '#e9e6ff', whiteSpace: 'nowrap', display: 'flex', gap: 10,
+          }}
+        >
+          <span style={{ color: '#3ff0ff', fontWeight: 700 }}>LIVE EXHIBITION WAGER</span>
+          <span style={{ color: backedFighter.color }}>BACKING: {backedFighter.name}</span>
+          <span style={{ color: '#ffc95c' }}>STAKE {spectatorBout.wager}C → PAYOUT {specPayout}C</span>
+        </div>
+      )}
+      {a.phase === 'fight' && !spectatorBout && (
         <div
           className="ps1-box"
           style={{
@@ -1574,7 +1894,7 @@ function ArenaHud() {
           </span>
         </div>
       )}
-      {a.phase === 'fight' && a.executeReady && (
+      {a.phase === 'fight' && !spectatorBout && a.executeReady && (
         <div
           className="ps1-box limb-crit"
           style={{
@@ -1591,8 +1911,12 @@ function ArenaHud() {
       {a.phase === 'intro' && (
         <div className="panel" style={{ background: 'transparent' }}>
           <div className="ps1-box" style={{ padding: '16px 36px', borderColor: activeCol.color }}>
-            <h1 style={{ color: activeCol.color }}>{selectedCard ? selectedCard.title : `BOUT ${a.bout}`}</h1>
-            <p style={{ marginTop: 6, color: '#e9e6ff' }}>ENTER {activeCol.name}</p>
+            <h1 style={{ color: activeCol.color }}>
+              {spectatorBout ? `${spectatorBout.red.name} VS ${spectatorBout.blue.name}` : selectedCard ? selectedCard.title : `BOUT ${a.bout}`}
+            </h1>
+            <p style={{ marginTop: 6, color: '#e9e6ff' }}>
+              {spectatorBout ? `EXHIBITION AT ${activeCol.name}` : `ENTER ${activeCol.name}`}
+            </p>
           </div>
         </div>
       )}
@@ -1601,14 +1925,33 @@ function ArenaHud() {
         <div className="panel clickable">
           <div className="ps1-box" style={{ display: 'grid', gap: 12, justifyItems: 'center', minWidth: 380 }}>
             <h1 style={a.phase === 'defeat' ? { color: '#ff4f6d', textShadow: '2px 2px 0 #05030a, 0 0 20px #ff4f6d88' } : undefined}>
-              {a.phase === 'champion' ? 'ROOT ACCESS SECURED' : a.phase === 'victory' ? 'PROCESS RETAINED' : 'DE-REZZED ON THE GRID'}
+              {spectatorBout
+                ? (a.phase === 'victory' ? 'EXHIBITION WAGER WON!' : 'EXHIBITION WAGER LOST')
+                : a.phase === 'champion' ? 'ROOT ACCESS SECURED' : a.phase === 'victory' ? 'PROCESS RETAINED' : 'DE-REZZED ON THE GRID'}
             </h1>
             {lastResult ? (
               <div style={{ display: 'grid', gap: 6, width: '100%', fontSize: 12, color: '#e9e6ff' }}>
+                {spectatorBout && lastResult.cause && (
+                  <div style={{ color: '#3ff0ff', fontSize: 12 }}>{lastResult.cause}</div>
+                )}
                 <div style={{ color: lastResult.denariiDelta >= 0 ? '#ffc95c' : '#ff6b6b' }}>
-                  {lastResult.denariiDelta >= 0 ? `+${lastResult.denariiDelta} CYCLES SIPHONED` : `${lastResult.denariiDelta} CYCLES (RECOVERY TAX)`}
+                  {spectatorBout
+                    ? (lastResult.denariiDelta >= 0 ? `NET WINNINGS: +${lastResult.denariiDelta} CYCLES` : `WAGER LOST: ${lastResult.denariiDelta} CYCLES`)
+                    : lastResult.denariiDelta >= 0 ? `+${lastResult.denariiDelta} CYCLES SIPHONED` : `${lastResult.denariiDelta} CYCLES (RECOVERY TAX)`}
                 </div>
                 <div style={{ color: '#3ff0ff' }}>+{lastResult.xpEarned} XP COMPILED</div>
+                {lastResult.beltEarned && (
+                  <div style={{ color: '#ffd866', fontWeight: 700, fontSize: 14, letterSpacing: '.12em' }}>
+                    ★ CHAMPION BELT CLAIMED: {lastResult.beltEarned} (+400C & +1 SPEC PT)
+                  </div>
+                )}
+                {lastResult.wagerId && lastResult.wagerId !== 'standard' && (
+                  <div style={{ color: lastResult.wagerFulfilled ? '#4dffa0' : '#ff8a3d', fontSize: 11 }}>
+                    {lastResult.wagerFulfilled
+                      ? `${WAGER_OATHS[lastResult.wagerId].name} FULFILLED (${WAGER_OATHS[lastResult.wagerId].mult}× PURSE)!`
+                      : `${WAGER_OATHS[lastResult.wagerId].name} MISSED — BASE PURSE PAID.`}
+                  </div>
+                )}
                 {lastResult.levelsGained > 0 && (
                   <div style={{ color: '#4dffa0', fontWeight: 700, fontSize: 14, letterSpacing: '.12em' }}>
                     BUILD UPGRADED! +{lastResult.levelsGained * 3} SPEC POINTS [PRESS C IN CITY]
@@ -1617,12 +1960,12 @@ function ArenaHud() {
                 <div style={{ color: lastResult.fameDelta >= 0 ? '#a78bfa' : '#ff6b6b' }}>
                   SIGNAL {lastResult.fameDelta >= 0 ? `+${lastResult.fameDelta}` : lastResult.fameDelta}
                 </div>
-                {readyQuests > 0 && (
+                {readyQuests > 0 && !spectatorBout && (
                   <div style={{ color: '#4dffa0' }}>
                     {readyQuests} Contract{readyQuests > 1 ? 's' : ''} ready to claim at the Bounty Terminal!
                   </div>
                 )}
-                {!lastResult.victory && (
+                {!lastResult.victory && !spectatorBout && (
                   <p style={{ marginTop: 4 }}>Rebooted inside your Safe Sector Pod. All specs and hard-light gear preserved.</p>
                 )}
               </div>
@@ -1633,25 +1976,36 @@ function ArenaHud() {
           </div>
         </div>
       )}
-      <div className="controls">
-        <KeyCap k="A/D" label="Lane (×2 Dash)" />
-        <KeyCap k="W/S" label="Stance + 3D Pivot" />
-        <KeyCap k="SPACE" label="Jump/DiveKick" />
-        <KeyCap k="LMB/J" label="Thrust" />
-        <KeyCap k="RMB/K" label="Launch/Sweep" />
-        <KeyCap k="F" label="Throw/Grab" />
-        <KeyCap k="E" label="Execute" />
-        <KeyCap k="SHIFT" label="Guard/Sidestep" />
-        <KeyCap k="H" label="Restore" />
-        <KeyCap k="TAB" label="2.5D/Free" />
-        <KeyCap k="P" label="CRT" />
-      </div>
+      {spectatorBout ? (
+        <div className="controls">
+          <KeyCap k="SPACE" label="Broadcast Cam" />
+          <KeyCap k="F" label="1×/2× Speed" />
+          <KeyCap k="T" label="Cheer Fighter" />
+          <KeyCap k="P" label="CRT" />
+        </div>
+      ) : (
+        <div className="controls">
+          <KeyCap k="A/D" label="Lane (×2 Dash)" />
+          <KeyCap k="W/S" label="Stance + 3D Pivot" />
+          <KeyCap k="SPACE" label="Jump/DiveKick" />
+          <KeyCap k="LMB/J" label="Thrust" />
+          <KeyCap k="RMB/K" label="Launch/Sweep" />
+          <KeyCap k="F" label="Throw/Grab" />
+          <KeyCap k="E" label="Execute" />
+          <KeyCap k="SHIFT" label="Guard/Sidestep" />
+          <KeyCap k="H" label="Restore" />
+          <KeyCap k="TAB" label="2.5D/Free" />
+          <KeyCap k="P" label="CRT" />
+        </div>
+      )}
     </>
   );
 }
 
 export function HUD() {
   const near = useGame((s) => s.near);
+  const nearEchoId = useGame((s) => s.nearEchoId);
+  const activeEchoId = useGame((s) => s.activeEchoId);
   const nearPropertyId = useGame((s) => s.nearPropertyId);
   const nearColosseumId = useGame((s) => s.nearColosseumId);
   const panel = useGame((s) => s.panel);
@@ -1662,17 +2016,20 @@ export function HUD() {
   const arrestPrompt = useGame((s) => s.arrestPrompt);
   const inJail = useGame((s) => s.inJail);
   const station = STATIONS.find((s) => s.id === near);
+  const nearEcho = nearEchoId ? MEMORY_ECHOES.find((e) => e.id === nearEchoId) : null;
   const nearCol = nearColosseumId ? COLOSSEUMS.find((c) => c.id === nearColosseumId) : null;
   const nearProp = nearPropertyId ? PROPERTY_BY_ID.get(nearPropertyId) : null;
-  const modalOpen = Boolean(panel || atlasOpen || activePropertyId || arrestPrompt || inJail);
+  const modalOpen = Boolean(panel || atlasOpen || activePropertyId || activeEchoId || arrestPrompt || inJail);
 
-  const hint = nearCol
-    ? { color: nearCol.color, text: `[ENTER] ENTER ${nearCol.name}` }
-    : nearProp
-      ? { color: '#ffc95c', text: `[ENTER] INSPECT DEED · ${nearProp.name}` }
-      : station
-        ? { color: station.color, text: `[ENTER] ${station.verb}` }
-        : null;
+  const hint = nearEcho
+    ? { color: nearEcho.color, text: `[ENTER] DECRYPT MEMORY ECHO · ${nearEcho.title}` }
+    : nearCol
+      ? { color: nearCol.color, text: `[ENTER] ENTER ${nearCol.name}` }
+      : nearProp
+        ? { color: '#ffc95c', text: `[ENTER] INSPECT DEED · ${nearProp.name}` }
+        : station
+          ? { color: station.color, text: `[ENTER] ${station.verb}` }
+          : null;
 
   const activeColosseumId = useGame((s) => s.activeColosseumId);
   const activeCol = COLOSSEUMS.find((c) => c.id === activeColosseumId) ?? COLOSSEUMS[0];
@@ -1688,9 +2045,9 @@ export function HUD() {
       {scene === 'ludus' && (
         <div className="controls">
           <KeyCap k="WASD" label="Move" />
+          <KeyCap k="SHIFT" label="Sprint" />
+          <KeyCap k="SPACE" label="Jump/Drift" />
           <KeyCap k="V" label="Cycle" />
-          <KeyCap k="F" label="Grapple" />
-          <KeyCap k="SPACE" label="ChainDash/Drift" />
           <KeyCap k="TAB" label="Lock" />
           <KeyCap k="E" label="Execute" />
           <KeyCap k="M" label="Atlas" />
@@ -1705,6 +2062,7 @@ export function HUD() {
       <StationPanel />
       <PropertyPanel />
       <WorldAtlasPanel />
+      <MemoryEchoModal />
       <ArenaHud />
     </div>
   );

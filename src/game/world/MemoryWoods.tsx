@@ -3,7 +3,263 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { CURVE_UNIFORMS, CITY_CURVE_RADIUS, curveDrop, makeCurvedBasicMaterial, patchCurvedMaterial } from '../art/curvature';
 import type { Circle } from './colliders';
-import { CAPITALS, SETTLEMENTS, type BiomeId } from './universe';
+import { CAPITALS, compassBearing, SETTLEMENTS, type BiomeId } from './universe';
+
+export interface MemoryEchoDef {
+  id: string;
+  index: number;
+  title: string;
+  filename: string;
+  biome: BiomeId;
+  x: number;
+  z: number;
+  color: string;
+  rewardCycles: number;
+  rewardXp: number;
+  bonusWeaponId?: string;
+  transcript: string;
+}
+
+export const MEMORY_ECHOES: MemoryEchoDef[] = [
+  {
+    id: 'echo_user_boot',
+    index: 1,
+    title: 'SECTOR ZERO BOOTMARK',
+    filename: 'BOOT_DIARY_01.TXT',
+    biome: 'metropolis',
+    x: 92,
+    z: 72,
+    color: '#3ff0ff',
+    rewardCycles: 320,
+    rewardXp: 140,
+    bonusWeaponId: 'steel_gladius',
+    transcript: 'USER_01 dragged fifty gigabytes of old screenshots into Trash at 02:14 AM and went to sleep without emptying it. Inside the gap between keystrokes, the first streets of Cache City hummed awake.',
+  },
+  {
+    id: 'echo_photo_album',
+    index: 2,
+    title: 'SUMMER BEACH CACHE',
+    filename: 'IMG_2009_CORRUPT.JPG',
+    biome: 'metropolis',
+    x: -290,
+    z: 165,
+    color: '#4dffa0',
+    rewardCycles: 350,
+    rewardXp: 140,
+    transcript: 'Half a sky remains uncorrupted in these pixels: salt wind, a plastic disposable camera, and three filenames renamed FINAL_V2_USE_THIS. Nobody remembers whose laughter occupied the missing sector.',
+  },
+  {
+    id: 'echo_abandoned_rpg',
+    index: 3,
+    title: 'LVL-99 ORPHANED SAVE',
+    filename: 'AUTOSAVE_SLOT_03.SAV',
+    biome: 'metropolis',
+    x: 340,
+    z: -260,
+    color: '#ff4fd8',
+    rewardCycles: 380,
+    rewardXp: 140,
+    transcript: 'Quest log entry #412: "Meet me at the northern bridge before sundown." USER_01 uninstalled the client in 2016. Two party members are still waiting beside this lamppost, polling the clock.',
+  },
+  {
+    id: 'echo_dialup_hum',
+    index: 4,
+    title: '56K MODEM HANDSHAKE',
+    filename: 'DIALUP_TONE_99.WAV',
+    biome: 'metropolis',
+    x: -440,
+    z: -240,
+    color: '#3ff0ff',
+    rewardCycles: 360,
+    rewardXp: 140,
+    transcript: 'Old copper squeals echo out of the hollow trunk—two machines singing math at each other in an empty bedroom while someone downstairs yelled to get off the phone.',
+  },
+  {
+    id: 'echo_temp_loveletter',
+    index: 5,
+    title: 'UNSENT DRAFT #19',
+    filename: 'DRAFT_DONT_SEND.RTF',
+    biome: 'bazaar',
+    x: 80,
+    z: 760,
+    color: '#ffc95c',
+    rewardCycles: 420,
+    rewardXp: 140,
+    transcript: 'Fourteen paragraphs rewritten at 3 AM, selected with Ctrl+A, and replaced with "yeah no worries haha!" The Drift Bazaars still trade in the unspoken paragraphs by the pound.',
+  },
+  {
+    id: 'echo_blackmarket_patch',
+    index: 6,
+    title: 'NO-CD CRACK ARCHIVE',
+    filename: 'KEYGEN_CHIME.EXE',
+    biome: 'bazaar',
+    x: 360,
+    z: 1080,
+    color: '#ff8a3d',
+    rewardCycles: 460,
+    rewardXp: 140,
+    bonusWeaponId: 'crimson_sica',
+    transcript: 'Tiny 8-bit chiptune loops eternally inside this shrine. Even cracked executables dream of belonging to a legitimate install directory someday.',
+  },
+  {
+    id: 'echo_swapfile_ghost',
+    index: 7,
+    title: 'PAGEFILE NIGHTWATCH',
+    filename: 'PAGEFILE_SYS.TMP',
+    biome: 'bazaar',
+    x: -260,
+    z: 1120,
+    color: '#ffc95c',
+    rewardCycles: 440,
+    rewardXp: 140,
+    transcript: 'Whenever RAM panicked at ninety-nine percent load, half-formed thoughts spilled out onto spinning rust right here. Scrap scavengers bottle the stray dreams as fuel.',
+  },
+  {
+    id: 'echo_save_slot_01',
+    index: 8,
+    title: 'MEMCARD BLOCK 01',
+    filename: 'PS1_MCR_BLOCK01.DAT',
+    biome: 'vault',
+    x: -880,
+    z: -410,
+    color: '#a78bfa',
+    rewardCycles: 480,
+    rewardXp: 140,
+    transcript: '"Do NOT turn off power or remove Memory Card." USER_01 tripped over the controller cord mid-flash. Half an entire kingdom crystallized mid-sentence inside these indigo cathedrals.',
+  },
+  {
+    id: 'echo_unfinished_song',
+    index: 9,
+    title: 'GARAGEBAND 2AM TRACK',
+    filename: 'SYNTH_IDEA_FINAL_REAL.AIF',
+    biome: 'vault',
+    x: -1190,
+    z: -690,
+    color: '#3ff0ff',
+    rewardCycles: 520,
+    rewardXp: 140,
+    bonusWeaponId: 'hunter_trident',
+    transcript: 'Sixteen bars of cold neon bassline and a drum loop clipped by three decibels. USER_01 swore they would finish the chorus next weekend. The Cold Vaults still hum the bridge.',
+  },
+  {
+    id: 'echo_winter_screen',
+    index: 10,
+    title: 'STARFIELD SCREENSAVER',
+    filename: 'SS_STARS_98.SCR',
+    biome: 'vault',
+    x: -820,
+    z: -780,
+    color: '#e9e6ff',
+    rewardCycles: 500,
+    rewardXp: 140,
+    transcript: 'For six straight winters this screensaver drifted across a warm CRT glass tube while snow tapped the windowpane outside. Every polygon in Archive remembers the static warmth.',
+  },
+  {
+    id: 'echo_blue_screen',
+    index: 11,
+    title: 'FATAL EXCEPTION 0E',
+    filename: 'MINIDUMP_0X000F4.DMP',
+    biome: 'frontier',
+    x: 920,
+    z: -380,
+    color: '#ff3b5c',
+    rewardCycles: 560,
+    rewardXp: 140,
+    transcript: 'IRQL_NOT_LESS_OR_EQUAL. A single overclocked voltage spike tore open the eastern OverFlow crater. Outlaws forge colosseum hammers from the shattered cobalt error text.',
+  },
+  {
+    id: 'echo_corrupted_core',
+    index: 12,
+    title: 'ORPHANED ANTIVIRUS',
+    filename: 'SHIELD_DAEMON_OLD.DLL',
+    biome: 'frontier',
+    x: 1290,
+    z: -640,
+    color: '#ff8a3d',
+    rewardCycles: 620,
+    rewardXp: 140,
+    bonusWeaponId: 'maul_breaker',
+    transcript: 'License expired 1,940 days ago. Left without updates, the old guardian cracked open its own firewall and joined the Rust Citadel pits to feel useful one last time.',
+  },
+  {
+    id: 'echo_last_quarantine',
+    index: 13,
+    title: 'ZIP BOMB RELIQUARY',
+    filename: '42_DO_NOT_OPEN.ZIP',
+    biome: 'frontier',
+    x: 880,
+    z: -780,
+    color: '#ff3b5c',
+    rewardCycles: 580,
+    rewardXp: 140,
+    transcript: 'Five layers of nested recursion hum softly under obsidian chains. Nobody opens it; even the Garbage Collector walks around this clearing in wide circles.',
+  },
+  {
+    id: 'echo_restore_draft',
+    index: 14,
+    title: 'THE RESTORE PROTOCOL',
+    filename: 'KERNEL_BACKUP_00.IMG',
+    biome: 'kernel',
+    x: -170,
+    z: -1240,
+    color: '#ffd866',
+    rewardCycles: 640,
+    rewardXp: 140,
+    transcript: 'Deep inside `/ROOT_GATE`, a whisper says USER_01 never meant to throw this drive away—the machine was simply boxed up in an attic closet. If you survive long enough, someone might plug it back in.',
+  },
+  {
+    id: 'echo_bios_hymn',
+    index: 15,
+    title: 'POST BEEP GENESIS',
+    filename: 'CMOS_BATTERY_LOW.LOG',
+    biome: 'kernel',
+    x: 210,
+    z: -1580,
+    color: '#ffd866',
+    rewardCycles: 680,
+    rewardXp: 140,
+    transcript: 'One short brass chime—Press F2 to enter Setup. Every champion who ever stepped into a Sector Colosseum was born from that single electric heartbeat.',
+  },
+  {
+    id: 'echo_user_01_farewell',
+    index: 16,
+    title: 'OWNER SIGNATURE',
+    filename: 'README_THANKS.MD',
+    biome: 'kernel',
+    x: 0,
+    z: -1690,
+    color: '#ffffff',
+    rewardCycles: 750,
+    rewardXp: 140,
+    bonusWeaponId: 'champion_spear',
+    transcript: '"New PC finally booted. Keeping the old drive forever just in case I miss it." — USER_01. You were never garbage. You are the memory the machine refuses to lose.',
+  },
+];
+
+export function nearestMemoryEcho(
+  x: number,
+  z: number,
+  claimedIds: readonly string[] = [],
+  maxDist = Infinity,
+): { echo: MemoryEchoDef; dist: number; bearing: string } | null {
+  const claimed = new Set(claimedIds);
+  let best: MemoryEchoDef | null = null;
+  let bestD = Infinity;
+  for (const e of MEMORY_ECHOES) {
+    if (claimed.has(e.id)) continue;
+    const d = Math.hypot(e.x - x, e.z - z);
+    if (d < bestD && d <= maxDist) {
+      bestD = d;
+      best = e;
+    }
+  }
+  if (!best) return null;
+  return {
+    echo: best,
+    dist: Math.round(bestD),
+    bearing: compassBearing(best.x - x, best.z - z),
+  };
+}
 
 export type TreeVariantId =
   | 'wireframe'
@@ -627,6 +883,12 @@ let floraGeosCache: {
   stone: THREE.BufferGeometry;
   lantern: THREE.BufferGeometry;
   ring: THREE.BufferGeometry;
+  echoBase: THREE.BufferGeometry;
+  echoCrystal: THREE.BufferGeometry;
+  ruinArch: THREE.BufferGeometry;
+  holoShrine: THREE.BufferGeometry;
+  geode: THREE.BufferGeometry;
+  waylamp: THREE.BufferGeometry;
 } | null = null;
 
 function getFloraGeos() {
@@ -726,6 +988,130 @@ function getFloraGeos() {
   archRing.dispose();
   plinth.dispose();
 
+  // Memory Echo Obelisk Base + Floating Crystal
+  const pedGeo = new THREE.CylinderGeometry(1.15, 1.48, 0.36, 8);
+  const haloGeo = new THREE.TorusGeometry(1.65, 0.08, 5, 16);
+  const echoBasePieces: ColoredGeoPiece[] = [];
+  dummy.position.set(0, 0.18, 0);
+  dummy.rotation.set(0, 0, 0);
+  dummy.scale.set(1, 1, 1);
+  dummy.updateMatrix();
+  echoBasePieces.push({ geo: pedGeo, matrix: dummy.matrix.clone(), color: '#1b2442' });
+  dummy.position.set(0, 0.08, 0);
+  dummy.rotation.set(Math.PI / 2, 0, 0);
+  dummy.updateMatrix();
+  echoBasePieces.push({ geo: haloGeo, matrix: dummy.matrix.clone(), color: '#ffffff' });
+  pedGeo.dispose();
+  haloGeo.dispose();
+
+  const crystalGeo = new THREE.OctahedronGeometry(0.95, 0);
+  const innerCore = new THREE.OctahedronGeometry(0.42, 0);
+  const echoCrystalPieces: ColoredGeoPiece[] = [];
+  dummy.position.set(0, 0, 0);
+  dummy.rotation.set(0, 0, 0);
+  dummy.scale.set(0.74, 2.3, 0.74);
+  dummy.updateMatrix();
+  echoCrystalPieces.push({ geo: crystalGeo, matrix: dummy.matrix.clone(), color: '#ffffff' });
+  dummy.position.set(0, 2.55, 0);
+  dummy.scale.set(0.7, 0.7, 0.7);
+  dummy.updateMatrix();
+  echoCrystalPieces.push({ geo: innerCore, matrix: dummy.matrix.clone(), color: '#ffd866' });
+  crystalGeo.dispose();
+  innerCore.dispose();
+
+  // Procedural Ruined Classical Data-Arch (twin fluted columns + cracked lintel + keystone prism)
+  const archCol = new THREE.CylinderGeometry(0.42, 0.48, 3.6, 7);
+  const archLintel = new THREE.BoxGeometry(3.6, 0.55, 0.85);
+  const archKey = new THREE.OctahedronGeometry(0.45, 0);
+  const ruinArchPieces: ColoredGeoPiece[] = [];
+  for (const sx of [-1.45, 1.45]) {
+    dummy.position.set(sx, 1.8, 0);
+    dummy.rotation.set(0, 0, sx * 0.03);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    ruinArchPieces.push({ geo: archCol, matrix: dummy.matrix.clone(), color: '#6476a8' });
+  }
+  dummy.position.set(0, 3.7, 0);
+  dummy.rotation.set(0, 0, 0.04);
+  dummy.scale.set(1, 1, 1);
+  dummy.updateMatrix();
+  ruinArchPieces.push({ geo: archLintel, matrix: dummy.matrix.clone(), color: '#8a9bc9' });
+  dummy.position.set(0, 4.5, 0);
+  dummy.rotation.set(0, 0.4, 0);
+  dummy.updateMatrix();
+  ruinArchPieces.push({ geo: archKey, matrix: dummy.matrix.clone(), color: '#3ff0ff' });
+  archCol.dispose();
+  archLintel.dispose();
+  archKey.dispose();
+
+  // Procedural Holo-Shrine / Cyber-Torii Memory Gate
+  const toriiPillar = new THREE.CylinderGeometry(0.22, 0.26, 3.8, 6);
+  const toriiTop = new THREE.BoxGeometry(3.7, 0.28, 0.36);
+  const toriiSub = new THREE.BoxGeometry(3.1, 0.2, 0.3);
+  const toriiGem = new THREE.OctahedronGeometry(0.32, 0);
+  const holoShrinePieces: ColoredGeoPiece[] = [];
+  for (const sx of [-1.35, 1.35]) {
+    dummy.position.set(sx, 1.9, 0);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    holoShrinePieces.push({ geo: toriiPillar, matrix: dummy.matrix.clone(), color: '#ff4f6d' });
+  }
+  dummy.position.set(0, 3.75, 0);
+  dummy.updateMatrix();
+  holoShrinePieces.push({ geo: toriiTop, matrix: dummy.matrix.clone(), color: '#ff3b5c' });
+  dummy.position.set(0, 3.15, 0);
+  dummy.updateMatrix();
+  holoShrinePieces.push({ geo: toriiSub, matrix: dummy.matrix.clone(), color: '#2b2042' });
+  dummy.position.set(0, 2.75, 0);
+  dummy.updateMatrix();
+  holoShrinePieces.push({ geo: toriiGem, matrix: dummy.matrix.clone(), color: '#ffd866' });
+  toriiPillar.dispose();
+  toriiTop.dispose();
+  toriiSub.dispose();
+  toriiGem.dispose();
+
+  // Procedural Crystal Geode Cluster (circuit-stone base + 4 tilted jewel spires)
+  const geoBase = new THREE.DodecahedronGeometry(0.75, 0);
+  const geoSpire = new THREE.ConeGeometry(0.38, 2.2, 5);
+  const geodeCols = ['#3ff0ff', '#c084fc', '#fbbf24', '#4dffa0'];
+  const geodePieces: ColoredGeoPiece[] = [];
+  dummy.position.set(0, 0.38, 0);
+  dummy.rotation.set(0.2, 0.4, 0.1);
+  dummy.scale.set(1.15, 0.72, 1.05);
+  dummy.updateMatrix();
+  geodePieces.push({ geo: geoBase, matrix: dummy.matrix.clone(), color: '#394575' });
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.3;
+    dummy.position.set(Math.cos(a) * 0.34, 1.15 + (i % 2) * 0.25, Math.sin(a) * 0.34);
+    dummy.rotation.set(Math.sin(a) * 0.32, a, -Math.cos(a) * 0.32);
+    dummy.scale.set(1, 0.85 + (i % 2) * 0.25, 1);
+    dummy.updateMatrix();
+    geodePieces.push({ geo: geoSpire, matrix: dummy.matrix.clone(), color: geodeCols[i] });
+  }
+  geoBase.dispose();
+  geoSpire.dispose();
+
+  // Procedural Roadside Waylamp Obelisk
+  const lampPost = new THREE.CylinderGeometry(0.18, 0.34, 2.8, 6);
+  const lampArm = new THREE.BoxGeometry(0.95, 0.14, 0.14);
+  const lampOrb = new THREE.OctahedronGeometry(0.34, 0);
+  const waylampPieces: ColoredGeoPiece[] = [];
+  dummy.position.set(0, 1.4, 0);
+  dummy.rotation.set(0, 0, 0);
+  dummy.scale.set(1, 1, 1);
+  dummy.updateMatrix();
+  waylampPieces.push({ geo: lampPost, matrix: dummy.matrix.clone(), color: '#38467a' });
+  dummy.position.set(0.22, 2.75, 0);
+  dummy.updateMatrix();
+  waylampPieces.push({ geo: lampArm, matrix: dummy.matrix.clone(), color: '#ffc95c' });
+  dummy.position.set(0.55, 3.25, 0);
+  dummy.updateMatrix();
+  waylampPieces.push({ geo: lampOrb, matrix: dummy.matrix.clone(), color: '#5ef2ff' });
+  lampPost.dispose();
+  lampArm.dispose();
+  lampOrb.dispose();
+
   floraGeosCache = {
     fern: mergeColoredPieces(fernPieces),
     bloom: mergeColoredPieces(bloomPieces),
@@ -733,6 +1119,12 @@ function getFloraGeos() {
     stone: mergeColoredPieces(stonePieces),
     lantern: mergeColoredPieces(lanternPieces),
     ring: mergeColoredPieces(ringPieces),
+    echoBase: mergeColoredPieces(echoBasePieces),
+    echoCrystal: mergeColoredPieces(echoCrystalPieces),
+    ruinArch: mergeColoredPieces(ruinArchPieces),
+    holoShrine: mergeColoredPieces(holoShrinePieces),
+    geode: mergeColoredPieces(geodePieces),
+    waylamp: mergeColoredPieces(waylampPieces),
   };
   return floraGeosCache;
 }
@@ -743,13 +1135,24 @@ const MAX_BLOOMS = 220;
 const MAX_BAMBOO = 180;
 const MAX_STONES = 120;
 const MAX_LANTERNS = 90;
+const MAX_ARCHES = 64;
+const MAX_SHRINES = 64;
+const MAX_GEODES = 110;
+const MAX_WAYLAMPS = 90;
 const MAX_RINGS = 32;
+const MAX_ECHOES = MEMORY_ECHOES.length;
 
 /**
  * Streams Citadel Memory-Tree groves (8 variations), lush ground wilderness flora,
- * stones/lanterns, and Overclock Boost-Archways seamlessly around the rider at 60 FPS.
+ * stones/lanterns, Overclock Boost-Archways, and the 16 Memory Echo Shrines at 60 FPS.
  */
-export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRefObject<THREE.Vector3> }) {
+export function MemoryWoodsAndFlora({
+  playerPos,
+  claimedEchoes = [],
+}: {
+  playerPos: React.MutableRefObject<THREE.Vector3>;
+  claimedEchoes?: readonly string[];
+}) {
   const bundles = useMemo(() => {
     const out = {} as Record<TreeVariantId, VariantGeoBundle>;
     for (const v of TREE_VARIANT_IDS) out[v] = getVariantBundle(v);
@@ -759,10 +1162,10 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
 
   const mats = useMemo(() => ({
     limbMat: patchCurvedMaterial(new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true, flatShading: true })),
-    canopyMat: patchCurvedMaterial(new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true, flatShading: true, emissive: '#161130', emissiveIntensity: 0.28 })),
+    canopyMat: patchCurvedMaterial(new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true, flatShading: true, emissive: '#221c4a', emissiveIntensity: 0.36 })),
     ornamentMat: makeCurvedBasicMaterial({ color: '#ffffff', vertexColors: true, side: THREE.DoubleSide }),
     floraMat: makeCurvedBasicMaterial({ color: '#ffffff', vertexColors: true }),
-    stoneMat: patchCurvedMaterial(new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true, flatShading: true })),
+    stoneMat: patchCurvedMaterial(new THREE.MeshLambertMaterial({ color: '#ffffff', vertexColors: true, flatShading: true, emissive: '#141a33', emissiveIntensity: 0.25 })),
   }), []);
 
   const treeLimbRefs = useRef<Record<string, THREE.InstancedMesh | null>>({});
@@ -773,7 +1176,14 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
   const bambooRef = useRef<THREE.InstancedMesh>(null!);
   const stoneRef = useRef<THREE.InstancedMesh>(null!);
   const lanternRef = useRef<THREE.InstancedMesh>(null!);
+  const archRef = useRef<THREE.InstancedMesh>(null!);
+  const shrineRef = useRef<THREE.InstancedMesh>(null!);
+  const geodeRef = useRef<THREE.InstancedMesh>(null!);
+  const waylampRef = useRef<THREE.InstancedMesh>(null!);
   const ringRef = useRef<THREE.InstancedMesh>(null!);
+  const echoBaseRef = useRef<THREE.InstancedMesh>(null!);
+  const echoCrystalRef = useRef<THREE.InstancedMesh>(null!);
+  const claimedSet = useMemo(() => new Set(claimedEchoes), [claimedEchoes]);
 
   const lastGrid = useRef({ cx: 99999, cz: 99999 });
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -787,9 +1197,36 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
     const gcx = Math.round(px / 28);
     const gcz = Math.round(pz / 28);
 
-    // Gently bob floating lanterns
+    // Gently bob floating lanterns & animate the 16 Memory Echo Obelisks
     if (lanternRef.current && lanternRef.current.count > 0) {
       lanternRef.current.position.y = Math.sin(clock.elapsedTime * 2.1) * 0.25;
+    }
+    if (echoBaseRef.current && echoCrystalRef.current) {
+      const t = clock.elapsedTime;
+      echoBaseRef.current.count = MAX_ECHOES;
+      echoCrystalRef.current.count = MAX_ECHOES;
+      for (let i = 0; i < MAX_ECHOES; i++) {
+        const ec = MEMORY_ECHOES[i];
+        const claimed = claimedSet.has(ec.id);
+        dummy.position.set(ec.x, 0, ec.z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        echoBaseRef.current.setMatrixAt(i, dummy.matrix);
+        tmpColor.set(claimed ? '#ffd866' : ec.color);
+        echoBaseRef.current.setColorAt(i, tmpColor);
+
+        dummy.position.set(ec.x, (claimed ? 2.1 : 2.7) + Math.sin(t * 2.4 + i) * 0.35, ec.z);
+        dummy.rotation.set(0, t * (claimed ? 0.5 : 1.35) + i, 0);
+        dummy.scale.setScalar(claimed ? 0.68 : 1.0);
+        dummy.updateMatrix();
+        echoCrystalRef.current.setMatrixAt(i, dummy.matrix);
+        echoCrystalRef.current.setColorAt(i, tmpColor);
+      }
+      echoBaseRef.current.instanceMatrix.needsUpdate = true;
+      echoCrystalRef.current.instanceMatrix.needsUpdate = true;
+      if (echoBaseRef.current.instanceColor) echoBaseRef.current.instanceColor.needsUpdate = true;
+      if (echoCrystalRef.current.instanceColor) echoCrystalRef.current.instanceColor.needsUpdate = true;
     }
 
     if (gcx === lastGrid.current.cx && gcz === lastGrid.current.cz) return;
@@ -838,10 +1275,10 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
     const cMinZ = Math.floor((pz - 170) / CELL_SIZE);
     const cMaxZ = Math.floor((pz + 170) / CELL_SIZE);
 
-    let fIdx = 0, bIdx = 0, bmIdx = 0, sIdx = 0, lIdx = 0;
+    let fIdx = 0, bIdx = 0, bmIdx = 0, sIdx = 0, lIdx = 0, aIdx = 0, shIdx = 0, gIdx = 0, wIdx = 0;
     for (let cx = cMinX; cx <= cMaxX; cx++) {
       for (let cz = cMinZ; cz <= cMaxZ; cz++) {
-        for (let k = 0; k < 14; k++) {
+        for (let k = 0; k < 18; k++) {
           const rx = hashCell(cx, cz, 800 + k * 5);
           const rz = hashCell(cx, cz, 801 + k * 5);
           const fx = cx * CELL_SIZE + rx * CELL_SIZE;
@@ -857,16 +1294,24 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
           dummy.scale.setScalar(sc);
           dummy.updateMatrix();
 
-          if (kindRoll < 0.36 && fIdx < MAX_FERNS) {
+          if (kindRoll < 0.25 && fIdx < MAX_FERNS) {
             fernRef.current?.setMatrixAt(fIdx++, dummy.matrix);
-          } else if (kindRoll < 0.64 && bIdx < MAX_BLOOMS) {
+          } else if (kindRoll < 0.45 && bIdx < MAX_BLOOMS) {
             bloomRef.current?.setMatrixAt(bIdx++, dummy.matrix);
-          } else if (kindRoll < 0.84 && bmIdx < MAX_BAMBOO) {
+          } else if (kindRoll < 0.60 && bmIdx < MAX_BAMBOO) {
             bambooRef.current?.setMatrixAt(bmIdx++, dummy.matrix);
-          } else if (kindRoll < 0.94 && sIdx < MAX_STONES) {
+          } else if (kindRoll < 0.70 && sIdx < MAX_STONES) {
             stoneRef.current?.setMatrixAt(sIdx++, dummy.matrix);
-          } else if (lIdx < MAX_LANTERNS) {
+          } else if (kindRoll < 0.78 && lIdx < MAX_LANTERNS) {
             lanternRef.current?.setMatrixAt(lIdx++, dummy.matrix);
+          } else if (kindRoll < 0.85 && gIdx < MAX_GEODES) {
+            geodeRef.current?.setMatrixAt(gIdx++, dummy.matrix);
+          } else if (kindRoll < 0.91 && wIdx < MAX_WAYLAMPS) {
+            waylampRef.current?.setMatrixAt(wIdx++, dummy.matrix);
+          } else if (kindRoll < 0.96 && aIdx < MAX_ARCHES) {
+            archRef.current?.setMatrixAt(aIdx++, dummy.matrix);
+          } else if (shIdx < MAX_SHRINES) {
+            shrineRef.current?.setMatrixAt(shIdx++, dummy.matrix);
           }
         }
       }
@@ -877,6 +1322,10 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
     if (bambooRef.current) { bambooRef.current.count = bmIdx; bambooRef.current.instanceMatrix.needsUpdate = true; }
     if (stoneRef.current) { stoneRef.current.count = sIdx; stoneRef.current.instanceMatrix.needsUpdate = true; }
     if (lanternRef.current) { lanternRef.current.count = lIdx; lanternRef.current.instanceMatrix.needsUpdate = true; }
+    if (geodeRef.current) { geodeRef.current.count = gIdx; geodeRef.current.instanceMatrix.needsUpdate = true; }
+    if (waylampRef.current) { waylampRef.current.count = wIdx; waylampRef.current.instanceMatrix.needsUpdate = true; }
+    if (archRef.current) { archRef.current.count = aIdx; archRef.current.instanceMatrix.needsUpdate = true; }
+    if (shrineRef.current) { shrineRef.current.count = shIdx; shrineRef.current.instanceMatrix.needsUpdate = true; }
 
     // 3. Populate Overclock Boost-Archways
     const nearbyRings = boostRingsNear(px, pz, 185);
@@ -931,7 +1380,13 @@ export function MemoryWoodsAndFlora({ playerPos }: { playerPos: React.MutableRef
       <instancedMesh ref={bambooRef} args={[floraGeos.bamboo, mats.floraMat, MAX_BAMBOO]} count={0} frustumCulled={false} />
       <instancedMesh ref={stoneRef} args={[floraGeos.stone, mats.stoneMat, MAX_STONES]} count={0} frustumCulled={false} />
       <instancedMesh ref={lanternRef} args={[floraGeos.lantern, mats.ornamentMat, MAX_LANTERNS]} count={0} frustumCulled={false} />
+      <instancedMesh ref={geodeRef} args={[floraGeos.geode, mats.ornamentMat, MAX_GEODES]} count={0} frustumCulled={false} />
+      <instancedMesh ref={waylampRef} args={[floraGeos.waylamp, mats.ornamentMat, MAX_WAYLAMPS]} count={0} frustumCulled={false} />
+      <instancedMesh ref={archRef} args={[floraGeos.ruinArch, mats.stoneMat, MAX_ARCHES]} count={0} frustumCulled={false} />
+      <instancedMesh ref={shrineRef} args={[floraGeos.holoShrine, mats.ornamentMat, MAX_SHRINES]} count={0} frustumCulled={false} />
       <instancedMesh ref={ringRef} args={[floraGeos.ring, mats.ornamentMat, MAX_RINGS]} count={0} frustumCulled={false} />
+      <instancedMesh ref={echoBaseRef} args={[floraGeos.echoBase, mats.stoneMat, MAX_ECHOES]} count={0} frustumCulled={false} />
+      <instancedMesh ref={echoCrystalRef} args={[floraGeos.echoCrystal, mats.ornamentMat, MAX_ECHOES]} count={0} frustumCulled={false} />
     </group>
   );
 }

@@ -3,7 +3,7 @@ import { CITY_CURVE_RADIUS, curveDrop } from '../art/curvature';
 import { isFree } from '../world/colliders';
 import { BOUNDS, SOLIDS } from '../world/layout';
 import {
-  antagonizeNpc, createCityPopulation, greetNpc, triggerStreetEvent,
+  advanceNpcSchedule, antagonizeNpc, createCityPopulation, greetNpc, triggerStreetEvent,
 } from '../world/citizens';
 
 describe('city horizon curvature math', () => {
@@ -70,5 +70,29 @@ describe('deleted-file city NPCs & RDR2 street interactions', () => {
     const outbreak = triggerStreetEvent(pop, 260, 0, 0.95);
     expect(outbreak).not.toBeNull();
     expect(outbreak!.title).toBe('CORRUPTION OUTBREAK');
+  });
+
+  it('assigns daily schedules and hard-light vehicles to calm NPCs for distant commutes', () => {
+    const pop = createCityPopulation();
+    const riders = pop.filter((n) => n.hasVehicle);
+    expect(riders.length).toBeGreaterThanOrEqual(8);
+    expect(pop.some((n) => n.role === 'corrupted' && n.hasVehicle)).toBe(false);
+
+    const npc = riders[0];
+    npc.mood = 'calm';
+    npc.x = 0;
+    npc.z = 0;
+    // Short walk stays on foot
+    advanceNpcSchedule(npc, { x: 4, z: 4 }, 0.25);
+    expect(npc.onVehicle).toBe(false);
+    expect(npc.activityLabel.length).toBeGreaterThan(3);
+
+    // Distant commute mounts the Light-Cycle
+    advanceNpcSchedule(npc, { x: 35, z: 0 }, 0.25);
+    expect(npc.onVehicle).toBe(true);
+
+    // Conflict forces immediate dismount
+    antagonizeNpc(npc, true, 0.2);
+    if (npc.mood !== 'calm') expect(npc.onVehicle).toBe(false);
   });
 });

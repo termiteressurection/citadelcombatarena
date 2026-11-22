@@ -14,11 +14,11 @@ import {
 } from './universe';
 
 const BIOME_GRID_COLORS: Record<BiomeId, { color: string; emissive: string }> = {
-  metropolis: { color: '#8ad8f0', emissive: '#071b2b' },
-  bazaar: { color: '#f2ba68', emissive: '#261406' },
-  vault: { color: '#c4b8ff', emissive: '#140f30' },
-  frontier: { color: '#e66c7a', emissive: '#29070d' },
-  kernel: { color: '#ffe58f', emissive: '#261f08' },
+  metropolis: { color: '#aaeaff', emissive: '#11324d' },
+  bazaar: { color: '#ffd084', emissive: '#3b210c' },
+  vault: { color: '#dcd2ff', emissive: '#221a4d' },
+  frontier: { color: '#ff8593', emissive: '#3d0d16' },
+  kernel: { color: '#fff0a8', emissive: '#3b3010' },
 };
 
 /** Endless R=200 curved TRON grid & abyss void that steps invisibly beneath the rider. */
@@ -518,6 +518,7 @@ export function StreamingSettlements({ playerPos }: { playerPos: React.MutableRe
 
   const propSet = new Set(vis.propSettlements);
   const activeProps = PROPERTIES.filter((p) => propSet.has(p.settlementId));
+  const claimedEchoes = useGame((s) => s.claimedEchoes);
 
   return (
     <group>
@@ -527,7 +528,7 @@ export function StreamingSettlements({ playerPos }: { playerPos: React.MutableRe
         <DistantCapitalHorizonSilhouette key={`dist-${c.id}`} cap={c} playerPos={playerPos} />
       ))}
       {activeProps.map((p) => <PropertyDeedView key={p.id} prop={p} />)}
-      <MemoryWoodsAndFlora playerPos={playerPos} />
+      <MemoryWoodsAndFlora playerPos={playerPos} claimedEchoes={claimedEchoes} />
     </group>
   );
 }

@@ -33,20 +33,19 @@ import {
   biomeAt, collidersNear, isSanctuaryPosition, nearestColosseum, nearestSettlement,
   nearestSettlementTerminal, nearestWorldColosseumGate, regionDisplayName, WORLD_BOUNDS,
 } from './world/universe';
-import { boostRingsNear, memoryTreesNear } from './world/MemoryWoods';
+import { boostRingsNear, nearestMemoryEcho } from './world/MemoryWoods';
 import { nearestPropertyDeed } from './world/properties';
 import { InfiniteCurvedFloor, NearestColosseumBeacon, StreamingSettlements } from './world/WorldRenderer';
 import {
-  antagonizeNpc, createCityPopulation, createRegionNpcs, greetNpc, pickCityPoint, triggerStreetEvent,
+  advanceNpcSchedule, antagonizeNpc, createCityPopulation, createRegionNpcs, greetNpc, pickCityPoint, triggerStreetEvent,
   type CityNpc,
 } from './world/citizens';
 import { consumeMouseLook, keys, pressed } from './input';
 import { useGame } from './store';
 
 const PLAYER_R = 0.55;
-const UNARMED_JOG_SPEED = 15.5;
-const UNARMED_SPRINT_SPEED = 23.0;
-const DASH_VAULT_SPEED = 26.5;
+const UNARMED_JOG_SPEED = 14.5;
+const UNARMED_SPRINT_SPEED = 21.5;
 const PLAYER_COMBAT_SPEED = 7.8;
 const CYCLE_SPEED = 46;
 const CYCLE_TURBO_SPEED = 68;
@@ -81,9 +80,9 @@ function NeonCityFloor() {
     const waterTex = cloneTex(getPs1Texture('water'), 2, 4);
     const waterMat = makePs1Material({ color: '#ffffff', map: waterTex, emissive: '#22c8e8', emissiveIntensity: 0.65 });
     return {
-      plaza: makePs1Material({ color: '#a8e6ff', map: cloneTex(getPs1Texture('grid'), 22, 22), emissive: '#0c273b', emissiveIntensity: 0.4 }),
-      avenue: makePs1Material({ color: '#6fd8ff', map: cloneTex(getPs1Texture('conduit'), 2, 28), emissive: '#0e324a', emissiveIntensity: 0.4 }),
-      cross: makePs1Material({ color: '#5fb6e8', map: cloneTex(getPs1Texture('conduit'), 16, 1), emissive: '#0c263a', emissiveIntensity: 0.35 }),
+      plaza: makePs1Material({ color: '#c2f0ff', map: cloneTex(getPs1Texture('grid'), 22, 22), emissive: '#133a57', emissiveIntensity: 0.55 }),
+      avenue: makePs1Material({ color: '#8ce2ff', map: cloneTex(getPs1Texture('conduit'), 2, 28), emissive: '#164566', emissiveIntensity: 0.55 }),
+      cross: makePs1Material({ color: '#7ccaff', map: cloneTex(getPs1Texture('conduit'), 16, 1), emissive: '#123654', emissiveIntensity: 0.48 }),
       cyanStrip: makeCurvedBasicMaterial({ color: '#3ff0ff' }),
       magStrip: makeCurvedBasicMaterial({ color: '#ff4fd8' }),
       conduit: makePs1Material({ color: '#273054', map: cloneTex(getPs1Texture('conduit'), 4, 1), emissive: '#10293d', emissiveIntensity: 0.35 }),
@@ -355,6 +354,9 @@ function syncGladiatorView(h: GladiatorHandle, f: Fighter, stanceTarget: number,
 
 function NpcActor({ npc }: { npc: CityNpc }) {
   const g = useRef<GladiatorHandle>(null!);
+  const npcBikeRef = useRef<THREE.Group>(null!);
+  const wheelFRef = useRef<THREE.Mesh>(null!);
+  const wheelRRef = useRef<THREE.Mesh>(null!);
   const labelGroup = useRef<THREE.Group>(null!);
   const limbPose = useRef<LimbPose>(makeLimbPose());
   const armorPose = useRef<Record<ArmorKey, boolean>>({ helm: true, pauldron: true, shield: true });
@@ -362,7 +364,14 @@ function NpcActor({ npc }: { npc: CityNpc }) {
     visible: false, text: npc.filename, color: npc.color,
   });
 
-  useFrame(() => {
+  const bikeMats = useMemo(() => ({
+    hull: makePs1Material({ color: '#1e284d', map: getPs1Texture('conduit'), emissive: '#102446', emissiveIntensity: 0.45 }),
+    trim: makeCurvedBasicMaterial({ color: npc.color }),
+    core: makeCurvedBasicMaterial({ color: '#e8fbff' }),
+  }), [npc.color]);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
     const h = g.current;
     if (!h) return;
     for (const k of LIMB_KEYS) {
@@ -376,6 +385,7 @@ function NpcActor({ npc }: { npc: CityNpc }) {
     h.pose.armor = armorPose.current;
 
     if (npc.mood === 'dead') {
+      if (npcBikeRef.current) npcBikeRef.current.visible = false;
       const rem = npc.collapseT ?? 0;
       if (rem > 0) {
         h.group.visible = true;
@@ -389,10 +399,28 @@ function NpcActor({ npc }: { npc: CityNpc }) {
       return;
     }
     const armed = npc.mood === 'hostile' || npc.role === 'corrupted';
-    syncGladiatorView(h, npc.fighter, armed ? 1 : 0, npc.gear.speedMul);
-    if (labelGroup.current) labelGroup.current.position.set(npc.x, 0, npc.z);
-    const desiredVis = npc.barkT > 0 || armed || npc.role === 'enforcer' || npc.role === 'gladiator';
-    const text = npc.barkT > 0 ? `${npc.filename}\n"${npc.bark}"` : armed ? `${npc.filename} [!]` : npc.filename;
+    const riding = npc.onVehicle && npc.mood === 'calm';
+    syncGladiatorView(h, npc.fighter, armed ? 1 : riding ? 0.65 : 0, npc.gear.speedMul);
+    if (riding) h.group.position.y = 0.42;
+
+    if (npcBikeRef.current) {
+      npcBikeRef.current.visible = riding;
+      if (riding) {
+        npcBikeRef.current.position.set(npc.x, 0, npc.z);
+        npcBikeRef.current.rotation.set(0, npc.yaw, npc.vehicleLean);
+        const wSpin = Math.hypot(npc.fighter.vx, npc.fighter.vz) * dt * 1.45;
+        if (wheelFRef.current) wheelFRef.current.rotation.x += wSpin;
+        if (wheelRRef.current) wheelRRef.current.rotation.x += wSpin;
+      }
+    }
+
+    if (labelGroup.current) labelGroup.current.position.set(npc.x, riding ? 0.42 : 0, npc.z);
+    const desiredVis = npc.barkT > 0 || armed || npc.role === 'enforcer' || npc.role === 'gladiator' || riding;
+    const text = npc.barkT > 0
+      ? `${npc.filename}\n"${npc.bark}"`
+      : armed
+        ? `${npc.filename} [!]`
+        : `${npc.filename}\n[${riding ? 'CYCLE · ' : ''}${npc.activityLabel}]`;
     const col = armed ? '#ff4f6d' : npc.color;
     if (desiredVis !== labelInfo.visible || (desiredVis && (text !== labelInfo.text || col !== labelInfo.color))) {
       setLabelInfo({ visible: desiredVis, text, color: col });
@@ -402,6 +430,26 @@ function NpcActor({ npc }: { npc: CityNpc }) {
   const armed = npc.mood === 'hostile' || npc.role === 'enforcer' || npc.role === 'corrupted';
   return (
     <group>
+      <group ref={npcBikeRef} visible={false}>
+        <mesh position={[0, 0.44, 0]} material={bikeMats.hull}><boxGeometry args={[0.52, 0.34, 2.2]} /></mesh>
+        <mesh position={[0, 0.66, 0.42]} rotation={[0.24, 0, 0]} material={bikeMats.hull}><boxGeometry args={[0.48, 0.24, 1.05]} /></mesh>
+        <mesh position={[0, 0.78, 0.55]} rotation={[0.42, 0, 0]} material={bikeMats.trim}><boxGeometry args={[0.38, 0.12, 0.68]} /></mesh>
+        {([-0.22, 0.22] as const).map((lx) => (
+          <mesh key={lx} position={[lx, 0.48, 0]} material={bikeMats.trim}><boxGeometry args={[0.08, 0.09, 2.05]} /></mesh>
+        ))}
+        <mesh ref={wheelFRef} position={[0, 0.4, 0.98]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.trim}>
+          <cylinderGeometry args={[0.4, 0.4, 0.22, 8]} />
+        </mesh>
+        <mesh position={[0, 0.4, 0.98]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.core}>
+          <cylinderGeometry args={[0.19, 0.19, 0.24, 8]} />
+        </mesh>
+        <mesh ref={wheelRRef} position={[0, 0.4, -0.92]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.trim}>
+          <cylinderGeometry args={[0.42, 0.42, 0.28, 8]} />
+        </mesh>
+        <mesh position={[0, 0.4, -0.92]} rotation={[0, 0, Math.PI / 2]} material={bikeMats.core}>
+          <cylinderGeometry args={[0.2, 0.2, 0.3, 8]} />
+        </mesh>
+      </group>
       <Gladiator
         key={`${npc.id}-${npc.civilian ? 'civ' : 'arm'}-${npc.role}`}
         ref={g}
@@ -669,8 +717,11 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     cycleSpeed: number;
     lastMoveSpeed: number;
     sprintHold: number;
-    unarmedDashT: number;
-    unarmedDashDir: { x: number; z: number };
+    sprintBlend: number;
+    turnRate: number;
+    wasInAir: boolean;
+    landSquash: number;
+    boostT: number;
     driftT: number;
     cycleBoostT: number;
     hitstop: number;
@@ -688,8 +739,6 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     sideCamDir: THREE.Vector2;
     lastTapA: number;
     lastTapD: number;
-    vaultChain: number;
-    vaultChainWindow: number;
     lastRingId: string | null;
     ringCd: number;
     time: number;
@@ -722,8 +771,11 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       cycleSpeed: 0,
       lastMoveSpeed: 0,
       sprintHold: 0,
-      unarmedDashT: 0,
-      unarmedDashDir: { x: 0, z: 1 },
+      sprintBlend: 0,
+      turnRate: 0,
+      wasInAir: false,
+      landSquash: 0,
+      boostT: 0,
       driftT: 0,
       cycleBoostT: 0,
       hitstop: 0,
@@ -741,8 +793,6 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       sideCamDir: new THREE.Vector2(1, 0),
       lastTapA: -9,
       lastTapD: -9,
-      vaultChain: 0,
-      vaultChainWindow: 0,
       lastRingId: null,
       ringCd: 0,
       time: 0,
@@ -851,28 +901,29 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     s.wasArrestOpen = Boolean(game.arrestPrompt);
 
     // Panel / Modal Toggles ([ESC], [C], [M], [V], [X])
-    if (pressed('Escape')) {
-      if (game.activePropertyId) game.openPropertyPanel(null);
+    if (pressed('Escape') || (game.activeEchoId && pressed('Enter'))) {
+      if (game.activeEchoId) game.closeEchoModal();
+      else if (game.activePropertyId) game.openPropertyPanel(null);
       else if (game.atlasOpen) game.setAtlasOpen(false);
       else if (game.panel) game.openPanel(null);
     }
-    if (!game.arrestPrompt && pressed('KeyC')) {
+    if (!game.arrestPrompt && !game.activeEchoId && pressed('KeyC')) {
       if (game.panel === 'locker') game.openPanel(null);
       else if (!game.panel && !game.atlasOpen && !game.activePropertyId) game.openPanel('locker');
     }
-    if (!game.arrestPrompt && pressed('KeyM')) {
+    if (!game.arrestPrompt && !game.activeEchoId && pressed('KeyM')) {
       if (game.atlasOpen) game.setAtlasOpen(false);
       else if (!game.panel && !game.activePropertyId) game.setAtlasOpen(true);
     }
 
-    const frozen = game.panel !== null || game.arrestPrompt !== null || game.atlasOpen || game.activePropertyId !== null;
+    const frozen = game.panel !== null || game.arrestPrompt !== null || game.atlasOpen || game.activePropertyId !== null || game.activeEchoId !== null;
     if (!frozen && pressed('KeyV')) {
       game.toggleCycle();
       const nowCycle = useGame.getState().onCycle;
       sfx.cycle(nowCycle);
       if (nowCycle) {
         s.lockedId = null;
-        s.unarmedDashT = 0;
+        s.boostT = 0;
       } else {
         s.driftT = 0;
         s.cycleBoostT = 0;
@@ -1118,13 +1169,14 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       ? screenRightZ * side
       : (moveLen > 0 ? (fzDir * fwd + rzDir * side) / moveLen : 0);
 
-    // Proximity interactables check (needed before Space Dash-Vault)
+    // Proximity interactables check (needed before Space jump/interact arbitration)
     const isNearCache = Math.hypot(p.x, p.z) < 185;
+    const nearEchoHit = curGamePre.inJail ? null : nearestMemoryEcho(p.x, p.z, curGamePre.claimedEchoes, 4.5);
     const nearColGate = curGamePre.inJail ? null : nearestWorldColosseumGate(p.x, p.z);
     const nearProp = curGamePre.inJail ? null : nearestPropertyDeed(p.x, p.z);
     const nearCacheStation = !curGamePre.inJail && isNearCache ? nearestStation(p.x, p.z) : null;
     const nearCapTerm = !curGamePre.inJail && !isNearCache ? nearestSettlementTerminal(p.x, p.z) : null;
-    const hasInteractPrompt = Boolean(nearColGate || nearProp || nearCacheStation || nearCapTerm);
+    const hasInteractPrompt = Boolean(nearEchoHit || nearColGate || nearProp || nearCacheStation || nearCapTerm);
 
     // Input buffering + Flying Dismount Cleave + Weapon Throw / Pickup + Jump / Sidestep
     const b = s.buf;
@@ -1152,10 +1204,9 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       } else if (atkLight || atkHeavy) {
         if (!curGamePre.weaponDrawn) {
           game.setWeaponDrawn(true);
-          if (s.unarmedDashT > 0 || ((keys.has('ShiftLeft') || keys.has('ShiftRight')) && moveLen > 0)) {
+          if ((keys.has('ShiftLeft') || keys.has('ShiftRight')) && moveLen > 0) {
             p.kx += Math.sin(p.yaw) * 14;
             p.kz += Math.cos(p.yaw) * 14;
-            s.unarmedDashT = 0;
             sfx.dodge();
           }
         }
@@ -1204,8 +1255,6 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         } else if (pressed('Space')) {
           b.dodge = 0.16;
         }
-      } else if (!useGame.getState().onCycle && pressed('Space')) {
-        b.dodge = 0.16;
       }
 
       if (useGame.getState().weaponDrawn && (pressed('ShiftLeft') || pressed('ShiftRight') || pressed('KeyL'))) b.parry = 0.16;
@@ -1379,104 +1428,46 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         }
       }
     } else {
-      // Unarmed sprint + Rhythmic Slide-Vault Chain + [F] Canopy Grapple-Launch
+      // Grounded Knee/Ankle Unarmed Locomotion + Smooth Sprint + Athletic Jump
       s.cycleSpeed = 0;
       p.state = 'idle';
       p.atk = null;
       p.blocking = false;
       p.stats = { ...p.stats, speed: PLAYER_COMBAT_SPEED, color: lookColor(look) };
+      s.landSquash = Math.max(0, s.landSquash - dt * 5.4);
+      s.boostT = Math.max(0, s.boostT - dt);
 
-      if (s.vaultChainWindow > 0) {
-        s.vaultChainWindow = Math.max(0, s.vaultChainWindow - dt);
-        if (s.vaultChainWindow === 0) s.vaultChain = 0;
-      }
-
-      if (!frozen && !curGame.inJail && pressed('Space') && !hasInteractPrompt && moveLen > 0 && s.unarmedDashT <= 0) {
-        if (s.vaultChainWindow > 0) {
-          s.vaultChain = Math.min(3, s.vaultChain + 1);
-          s.vaultChainWindow = 0;
-        } else {
-          s.vaultChain = 1;
-        }
-        s.unarmedDashT = 0.30;
-        s.unarmedDashDir = { x: moveX, z: moveZ };
-        p.yaw = Math.atan2(moveX, moveZ);
+      if (!frozen && !curGame.inJail && pressed('Space') && !hasInteractPrompt && p.airY <= 0.01) {
+        p.airVy = 8.2;
+        p.airY = 0.04;
         sfx.dodge();
-        if (s.vaultChain >= 2) {
-          sfx.boost();
-          s.fovKick = Math.max(s.fovKick, 4.5);
-          fx.shards.burst(p.x, 0.4, p.z, 12, 6, '#ffc95c', -moveX, -moveZ);
-          game.triggerStreetCallout(`MOMENTUM CHAIN ×${s.vaultChain}!`, s.vaultChain >= 3 ? '#ffc95c' : '#3ff0ff');
-        }
-        for (let gi = 0; gi < 3; gi++) {
-          fx.ghosts.spawn(p.x - moveX * gi * 0.45, p.z - moveZ * gi * 0.45, p.yaw, s.vaultChain >= 2 ? '#ffc95c' : lookColor(look), moveZ * 0.45, -moveX * 0.45);
-        }
-      }
-
-      // [F] Hard-Light Canopy / Boost-Archway Grapple-Launch across wilderness
-      if (!frozen && !curGame.inJail && pressed('KeyF')) {
-        const trees = memoryTreesNear(p.x, p.z, 28);
-        const rings = boostRingsNear(p.x, p.z, 28);
-        const aimX = moveLen > 0 ? moveX : fxDir;
-        const aimZ = moveLen > 0 ? moveZ : fzDir;
-        let bestAnchor: { x: number; z: number } | null = null;
-        let bestScore = -Infinity;
-        for (const cand of [...rings, ...trees]) {
-          const dxA = cand.x - p.x, dzA = cand.z - p.z;
-          const distA = Math.hypot(dxA, dzA);
-          if (distA < 5 || distA > 26) continue;
-          const align = (dxA / distA) * aimX + (dzA / distA) * aimZ;
-          const score = align * 14 - distA * 0.25;
-          if (align > 0.15 && score > bestScore) { bestScore = score; bestAnchor = cand; }
-        }
-        if (bestAnchor) {
-          const dxG = bestAnchor.x - p.x, dzG = bestAnchor.z - p.z;
-          const dG = Math.hypot(dxG, dzG) || 1;
-          const uxG = dxG / dG, uzG = dzG / dG;
-          p.kx = uxG * 32;
-          p.kz = uzG * 32;
-          p.airVy = 8.2;
-          p.airY = 0.06;
-          p.yaw = Math.atan2(uxG, uzG);
-          s.unarmedDashT = 0.42;
-          s.unarmedDashDir = { x: uxG, z: uzG };
-          s.vaultChain = 2;
-          s.fovKick = 5.5;
-          sfx.boost();
-          fx.slashes.spawn(p.x, p.z, p.yaw, 'light3', '#3ff0ff', p.style, 'thrust');
-          fx.shards.burst(bestAnchor.x, 2.2, bestAnchor.z, 18, 7, '#3ff0ff');
-          game.triggerStreetCallout('CANOPY GRAPPLE!', '#3ff0ff');
-        }
       }
 
       if (p.airY > 0 || p.airVy !== 0) {
-        p.airVy -= 20 * dt;
+        p.airVy -= 21 * dt;
         p.airY += p.airVy * dt;
-        if (p.airY <= 0) { p.airY = 0; p.airVy = 0; }
+        if (p.airY <= 0) {
+          p.airY = 0;
+          p.airVy = 0;
+          if (s.wasInAir) {
+            s.landSquash = 1.0;
+            fx.shards.burst(p.x, 0.12, p.z, 6, 3.2, lookColor(look));
+          }
+        }
       }
+      s.wasInAir = p.airY > 0.04;
 
       const sprintingUnarmed = !frozen && (keys.has('ShiftLeft') || keys.has('ShiftRight')) && moveLen > 0;
-      if (s.unarmedDashT > 0) {
-        s.unarmedDashT = Math.max(0, s.unarmedDashT - dt);
-        if (s.unarmedDashT === 0) s.vaultChainWindow = 0.42;
-        const dashSpd = s.vaultChain >= 3 ? 32 : s.vaultChain === 2 ? 29 : DASH_VAULT_SPEED;
-        p.vx = s.unarmedDashDir.x * dashSpd;
-        p.vz = s.unarmedDashDir.z * dashSpd;
-        s.lastMoveSpeed = dashSpd;
-        p.localVz = 1;
-        if (s.vaultChain >= 2 && Math.random() < 0.4) {
-          fx.shards.burst(p.x, 0.16, p.z, 1, 3.2, '#ffc95c', -s.unarmedDashDir.x, -s.unarmedDashDir.z);
-        }
-      } else {
-        const targetSpd = !frozen && moveLen > 0 ? (sprintingUnarmed ? UNARMED_SPRINT_SPEED : UNARMED_JOG_SPEED) : 0;
-        const accel = moveLen > 0 ? 14 : 18;
-        s.lastMoveSpeed = THREE.MathUtils.lerp(s.lastMoveSpeed, targetSpd, 1 - Math.exp(-accel * dt));
-        p.vx = moveX * s.lastMoveSpeed;
-        p.vz = moveZ * s.lastMoveSpeed;
-        p.localVz = Math.min(1, s.lastMoveSpeed / UNARMED_JOG_SPEED);
-        if (sprintingUnarmed && Math.random() < 0.25) {
-          fx.shards.burst(p.x, 0.14, p.z, 1, 2.5, lookColor(look), -moveX, -moveZ);
-        }
+      s.sprintBlend = THREE.MathUtils.lerp(s.sprintBlend, sprintingUnarmed ? 1 : 0, 1 - Math.exp(-9 * dt));
+      const baseTarget = !frozen && moveLen > 0 ? THREE.MathUtils.lerp(UNARMED_JOG_SPEED, UNARMED_SPRINT_SPEED, s.sprintBlend) : 0;
+      const targetSpd = s.boostT > 0 ? Math.max(baseTarget, 28) : baseTarget;
+      const accel = moveLen > 0 ? 12 : 16;
+      s.lastMoveSpeed = THREE.MathUtils.lerp(s.lastMoveSpeed, targetSpd, 1 - Math.exp(-accel * dt));
+      p.vx = moveX * s.lastMoveSpeed;
+      p.vz = moveZ * s.lastMoveSpeed;
+      p.localVz = Math.min(1, s.lastMoveSpeed / UNARMED_JOG_SPEED);
+      if (sprintingUnarmed && p.airY === 0 && Math.random() < 0.22) {
+        fx.shards.burst(p.x, 0.14, p.z, 1, 2.4, lookColor(look), -moveX, -moveZ);
       }
 
       p.x += (p.vx + p.kx) * dt;
@@ -1490,7 +1481,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         ? Math.atan2(-fxDir, -fzDir) + 0.32
         : sp > 0.4 ? Math.atan2(p.vx, p.vz) : Math.atan2(fxDir, fzDir);
       const d = Math.atan2(Math.sin(targetYaw - p.yaw), Math.cos(targetYaw - p.yaw));
-      p.yaw += d * (1 - Math.exp(-16 * rawDt));
+      const yawStep = d * (1 - Math.exp(-15 * rawDt));
+      p.yaw += yawStep;
+      const rawTurn = rawDt > 0 ? THREE.MathUtils.clamp((yawStep / rawDt) / 7.5, -1.2, 1.2) : 0;
+      s.turnRate = THREE.MathUtils.lerp(s.turnRate, rawTurn, 1 - Math.exp(-14 * rawDt));
       p.localVx = 0;
     }
 
@@ -1519,9 +1513,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
             s.cycleBoostT = 1.8;
             s.cycleSpeed = CYCLE_BOOST_SPEED;
           } else {
-            s.unarmedDashT = 0.55;
-            s.unarmedDashDir = { x: Math.sin(p.yaw), z: Math.cos(p.yaw) };
-            s.vaultChain = 3;
+            s.boostT = 0.85;
+            s.lastMoveSpeed = 28;
+            p.kx += Math.sin(p.yaw) * 14;
+            p.kz += Math.cos(p.yaw) * 14;
           }
           s.fovKick = 6.0;
           sfx.boost();
@@ -1661,6 +1656,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
           }
         }
       } else {
+        if (n.mood !== 'calm') n.onVehicle = false;
         f.state = 'idle'; f.atk = null; f.blocking = false;
         let spd = n.civilian ? 1.85 : n.role === 'enforcer' ? 3.2 : 2.35;
         if (n.mood === 'fleeing' && dToPlayer < 22) {
@@ -1671,25 +1667,43 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         }
         if (n.wait > 0 && n.mood !== 'fleeing') {
           n.wait -= dt;
+          n.onVehicle = false;
+          n.vehicleLean = 0;
           f.vx = 0; f.vz = 0; f.localVz = 0;
         } else {
           const dx = n.targetX - f.x, dz = n.targetZ - f.z;
           const dist = Math.hypot(dx, dz);
-          if (dist < 0.9) {
+          const arriveR = n.onVehicle ? 2.2 : 0.9;
+          if (dist < arriveR) {
             if (n.mood === 'fleeing' && dToPlayer > 22) n.mood = 'calm';
             const nextPt = isNearCache
               ? pickCityPoint(n.role === 'corrupted' ? 'heap' : n.role === 'hustler' ? 'alley' : 'plaza')
-              : { x: regionRef.current.x + (Math.random() - 0.5) * 32, z: regionRef.current.z + (Math.random() - 0.5) * 32 };
-            n.targetX = nextPt.x; n.targetZ = nextPt.z;
-            n.wait = 1 + Math.random() * 4;
+              : { x: regionRef.current.x + (Math.random() - 0.5) * 60, z: regionRef.current.z + (Math.random() - 0.5) * 60 };
+            n.onVehicle = false;
+            n.vehicleLean = 0;
+            advanceNpcSchedule(n, nextPt);
+            n.wait = 1.4 + Math.random() * 4;
             f.vx = 0; f.vz = 0; f.localVz = 0;
           } else {
-            f.vx = (dx / dist) * spd;
-            f.vz = (dz / dist) * spd;
+            if (n.hasVehicle && n.mood === 'calm' && dist > 16) n.onVehicle = true;
+            if (n.onVehicle) spd = n.role === 'enforcer' ? 12.5 : 10.5;
+            const desiredYaw = Math.atan2(dx, dz);
+            const dyaw = Math.atan2(Math.sin(desiredYaw - f.yaw), Math.cos(desiredYaw - f.yaw));
+            if (n.onVehicle) {
+              const turnStep = THREE.MathUtils.clamp(dyaw, -4.2 * dt, 4.2 * dt);
+              f.yaw += turnStep;
+              n.vehicleLean = THREE.MathUtils.lerp(n.vehicleLean, THREE.MathUtils.clamp(-dyaw * 0.45, -0.35, 0.35), 1 - Math.exp(-8 * dt));
+              f.vx = Math.sin(f.yaw) * spd;
+              f.vz = Math.cos(f.yaw) * spd;
+            } else {
+              n.vehicleLean = 0;
+              f.vx = (dx / dist) * spd;
+              f.vz = (dz / dist) * spd;
+              f.yaw = desiredYaw;
+            }
             f.x += f.vx * dt;
             f.z += f.vz * dt;
-            f.yaw = Math.atan2(dx, dz);
-            f.localVz = n.mood === 'fleeing' ? 0.9 : 0.35;
+            f.localVz = n.onVehicle ? 0.5 : n.mood === 'fleeing' ? 0.9 : 0.35;
           }
         }
       }
@@ -1712,8 +1726,8 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       if (Math.hypot(np.x - n.x, np.z - n.z) < 0.008 && n.wait <= 0 && n.mood !== 'hostile') {
         const nextPt = isNearCache
           ? pickCityPoint(n.role === 'corrupted' ? 'heap' : 'plaza')
-          : { x: regionRef.current.x + (Math.random() - 0.5) * 28, z: regionRef.current.z + (Math.random() - 0.5) * 28 };
-        n.targetX = nextPt.x; n.targetZ = nextPt.z;
+          : { x: regionRef.current.x + (Math.random() - 0.5) * 48, z: regionRef.current.z + (Math.random() - 0.5) * 48 };
+        advanceNpcSchedule(n, nextPt);
       }
       f.x = np.x; f.z = np.z;
       n.x = np.x; n.z = np.z;
@@ -1796,6 +1810,9 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       armorPose.current.shield = !p.armor.shield.broken;
       g.current.pose.armor = armorPose.current;
       syncGladiatorView(g.current, p, curGame.weaponDrawn ? 1 : curGame.onCycle ? 0.65 : showcaseOpen ? 0.85 : 0, playerGear.speedMul);
+      g.current.pose.sprint = curGame.weaponDrawn || curGame.onCycle ? 0 : s.sprintBlend;
+      g.current.pose.turnRate = curGame.weaponDrawn || curGame.onCycle ? 0 : s.turnRate;
+      g.current.pose.landSquash = s.landSquash;
       if (curGame.onCycle && !curGame.inJail) {
         g.current.group.position.y = 0.42;
       }
@@ -1845,8 +1862,9 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
       }
     }
 
-    // Interactions: Colosseum Gate > Property Deed > Station / Capital Terminal
+    // Interactions: Memory Echo > Colosseum Gate > Property Deed > Station / Capital Terminal
     if (!frozen) {
+      game.setNearEcho(nearEchoHit?.echo.id ?? null);
       game.setNearColosseum(nearColGate?.id ?? null);
       game.setNearProperty(nearProp?.id ?? null);
       const stationId = nearCacheStation ? nearCacheStation.id : nearCapTerm ? nearCapTerm.kind : null;
@@ -1854,7 +1872,10 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
 
       const interactPressed = pressed('Enter') || (!curGame.onCycle && !curGame.weaponDrawn && hasInteractPrompt && pressed('Space'));
       if (interactPressed) {
-        if (nearColGate) {
+        if (nearEchoHit && game.claimMemoryEcho(nearEchoHit.echo.id)) {
+          sfx.execute();
+          fx.shards.burst(nearEchoHit.echo.x, 2.2, nearEchoHit.echo.z, 32, 9.5, nearEchoHit.echo.color);
+        } else if (nearColGate) {
           game.setLastWorldPos(p.x, p.z);
           game.openColosseumGate(nearColGate.id);
         } else if (nearProp) {
@@ -1876,6 +1897,7 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
     if (s.vitalsTick > 0.14) {
       s.vitalsTick = 0;
       const nc = nearestColosseum(p.x, p.z);
+      const ne = nearestMemoryEcho(p.x, p.z, curGame.claimedEchoes);
       game.setWorldTelemetry({
         beacon: {
           id: nc.colosseum.id,
@@ -1888,6 +1910,9 @@ function CityWorldSimulation({ playerPos }: { playerPos: PosRef }) {
         regionName: regionDisplayName(p.x, p.z),
         x: p.x,
         z: p.z,
+        nearestEcho: ne
+          ? { id: ne.echo.id, title: ne.echo.title, color: ne.echo.color, dist: ne.dist, bearing: ne.bearing }
+          : null,
       });
       game.setStreetVitals({ hp: Math.ceil(p.hp), maxHp: p.maxHp, st: Math.floor(p.stamina), maxSt: p.maxStamina });
       game.setNearNpc(
@@ -1971,27 +1996,27 @@ export function Ludus() {
   const morning = timeOfDay === 'morning';
   const curBiome = biomeAt(playerPos.current.x, playerPos.current.z);
   const fogHex =
-    curBiome === 'bazaar' ? '#1c0f08'
-    : curBiome === 'vault' ? '#0e102e'
-    : curBiome === 'frontier' ? '#21070d'
-    : curBiome === 'kernel' ? '#1c180a'
-    : morning ? '#0d1936' : '#1e082e';
+    curBiome === 'bazaar' ? '#28170d'
+    : curBiome === 'vault' ? '#161a42'
+    : curBiome === 'frontier' ? '#300c14'
+    : curBiome === 'kernel' ? '#2a2410'
+    : morning ? '#14264f' : '#2b0e42';
   void currentRegionName;
 
   return (
     <>
-      <color attach="background" args={[morning ? '#070a1c' : '#12051c']} />
-      <fog attach="fog" args={[fogHex, morning ? 56 : 44, morning ? 195 : 175]} />
-      <hemisphereLight args={morning ? ['#4fd8ff', '#16112b', 1.1] : ['#ff62b8', '#150826', 0.95]} />
+      <color attach="background" args={[morning ? '#0e1530' : '#1c0a2b']} />
+      <fog attach="fog" args={[fogHex, morning ? 68 : 54, morning ? 240 : 215]} />
+      <hemisphereLight args={morning ? ['#6ee2ff', '#28204a', 1.38] : ['#ff7ac6', '#261240', 1.22]} />
       <directionalLight
         position={morning ? [28, 42, 22] : [-26, 22, -24]}
-        intensity={morning ? 1.45 : 1.35}
-        color={morning ? '#b8f4ff' : '#ff7a5c'}
+        intensity={morning ? 1.82 : 1.68}
+        color={morning ? '#d0f8ff' : '#ff9475'}
       />
       <directionalLight
         position={morning ? [-22, 18, -26] : [22, 18, 22]}
-        intensity={0.6}
-        color={morning ? '#ff6ad5' : '#3ff0ff'}
+        intensity={0.88}
+        color={morning ? '#ff85df' : '#5ef2ff'}
       />
       <Ps1Sky mood={morning ? 'city_cycle' : 'city_purge'} playerPosRef={playerPos} openWorld />
       <Starfield playerPosRef={playerPos} />

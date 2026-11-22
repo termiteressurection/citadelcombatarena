@@ -8,6 +8,7 @@ import { collidersNear, isSanctuaryPosition, WORLD_BOUNDS, type Settlement } fro
 export type NpcRole = 'citizen' | 'hustler' | 'gladiator' | 'corrupted' | 'enforcer';
 export type NpcTemperament = 'timid' | 'proud' | 'volatile' | 'helpful' | 'opportunist';
 export type NpcMood = 'calm' | 'suspicious' | 'panicked' | 'hostile' | 'grateful' | 'fleeing' | 'dead';
+export type NpcActivity = 'commuting' | 'shopping' | 'spectating' | 'patrolling' | 'hustling' | 'resting';
 
 export interface CityNpc {
   id: number;
@@ -31,6 +32,11 @@ export interface CityNpc {
   antagonized: number;
   bountyReward: number;
   respawnT: number;
+  activity: NpcActivity;
+  activityLabel: string;
+  hasVehicle: boolean;
+  onVehicle: boolean;
+  vehicleLean: number;
   collapseT?: number;
   collapseDx?: number;
   collapseDz?: number;
@@ -143,6 +149,56 @@ function buildNpcFighter(
   return f;
 }
 
+const SCHEDULE_BY_ROLE: Record<NpcRole, { activity: NpcActivity; label: string }[]> = {
+  citizen: [
+    { activity: 'commuting', label: 'CRUISING TO COMPILER FORGE' },
+    { activity: 'shopping', label: 'PATCH KIOSK RUN' },
+    { activity: 'spectating', label: 'COLOSSEUM BLEACHERS' },
+    { activity: 'resting', label: 'MEM-CORE FOUNTAIN BREAK' },
+  ],
+  gladiator: [
+    { activity: 'spectating', label: 'HEADING TO COLOSSEUM' },
+    { activity: 'shopping', label: 'COMPILER FORGE TUNE-UP' },
+    { activity: 'commuting', label: 'WARMING UP CYCLES' },
+  ],
+  hustler: [
+    { activity: 'hustling', label: 'BLACK-MARKET DROP' },
+    { activity: 'shopping', label: 'PATCH KIOSK TRADE' },
+    { activity: 'commuting', label: 'CONDUIT RUN' },
+  ],
+  enforcer: [
+    { activity: 'patrolling', label: 'SECTOR HIGHWAY PATROL' },
+  ],
+  corrupted: [
+    { activity: 'hustling', label: 'OVERFLOW STALKING' },
+  ],
+};
+
+export function advanceNpcSchedule(npc: CityNpc, nextPt: { x: number; z: number }, roll = Math.random()): void {
+  const pool = SCHEDULE_BY_ROLE[npc.role];
+  const pick = pool[Math.floor(roll * pool.length) % pool.length];
+  npc.activity = pick.activity;
+  npc.activityLabel = pick.label;
+  npc.targetX = nextPt.x;
+  npc.targetZ = nextPt.z;
+  const dist = Math.hypot(nextPt.x - npc.x, nextPt.z - npc.z);
+  npc.onVehicle = npc.hasVehicle && npc.mood === 'calm' && dist > 16;
+}
+
+function seedLife(id: number, role: NpcRole, x: number, z: number, tx: number, tz: number) {
+  const hasVehicle = role !== 'corrupted' && (id % 5 < 3);
+  const pool = SCHEDULE_BY_ROLE[role];
+  const pick = pool[id % pool.length];
+  const onVehicle = hasVehicle && Math.hypot(tx - x, tz - z) > 16;
+  return {
+    activity: pick.activity,
+    activityLabel: pick.label,
+    hasVehicle,
+    onVehicle,
+    vehicleLean: 0,
+  };
+}
+
 export function createCityPopulation(): CityNpc[] {
   const list: CityNpc[] = [];
   let nextId = 100;
@@ -174,6 +230,7 @@ export function createCityPopulation(): CityNpc[] {
       antagonized: 0,
       bountyReward: 12,
       respawnT: 0,
+      ...seedLife(id, 'citizen', p.x, p.z, t.x, t.z),
       fighter: buildNpcFighter(id, spec.filename, 'citizen', 'murmillo', gear, spec.color, p.x, p.z),
     });
   }
@@ -205,6 +262,7 @@ export function createCityPopulation(): CityNpc[] {
       antagonized: 0,
       bountyReward: 24,
       respawnT: 0,
+      ...seedLife(id, 'hustler', p.x, p.z, t.x, t.z),
       fighter: buildNpcFighter(id, spec.filename, 'hustler', spec.style, gear, spec.color, p.x, p.z),
     });
   }
@@ -236,6 +294,7 @@ export function createCityPopulation(): CityNpc[] {
       antagonized: 0,
       bountyReward: spec.reward,
       respawnT: 0,
+      ...seedLife(id, 'gladiator', p.x, p.z, t.x, t.z),
       fighter: buildNpcFighter(id, spec.filename, 'gladiator', spec.style, gear, spec.color, p.x, p.z),
     });
   }
@@ -267,6 +326,7 @@ export function createCityPopulation(): CityNpc[] {
       antagonized: 0,
       bountyReward: spec.reward,
       respawnT: 0,
+      ...seedLife(id, 'corrupted', p.x, p.z, t.x, t.z),
       fighter: buildNpcFighter(id, spec.filename, 'corrupted', spec.style, gear, '#ff3b5c', p.x, p.z),
     });
   }
@@ -298,6 +358,7 @@ export function createCityPopulation(): CityNpc[] {
       antagonized: 0,
       bountyReward: 45,
       respawnT: 0,
+      ...seedLife(id, 'enforcer', p.x, p.z, t.x, t.z),
       fighter: buildNpcFighter(id, spec.filename, 'enforcer', spec.style, gear, '#ff4f6d', p.x, p.z),
     });
   }
@@ -382,6 +443,7 @@ export function greetNpc(npc: CityNpc, playerSignal: number, roll = Math.random(
 
 export function antagonizeNpc(npc: CityNpc, playerArmed: boolean, roll = Math.random()): AntagonizeOutcome {
   npc.antagonized += 1;
+  npc.onVehicle = false;
 
   if (npc.role === 'enforcer') {
     npc.mood = 'hostile';
@@ -520,7 +582,9 @@ export function triggerStreetEvent(
     hustler.targetZ = citizen.z + 1.5;
     hustler.wait = 0;
     hustler.mood = 'suspicious';
+    hustler.onVehicle = false;
     citizen.mood = 'panicked';
+    citizen.onVehicle = false;
     citizen.bark = `HELP! ${hustler.filename} is trying to siphon my Cycles!`;
     citizen.barkT = 6;
     return {
@@ -535,6 +599,7 @@ export function triggerStreetEvent(
   const target = candidates[0];
   target.role = 'corrupted';
   target.mood = 'hostile';
+  target.onVehicle = false;
   target.civilian = false;
   target.color = '#ff3b5c';
   target.bountyReward = 35;
@@ -593,6 +658,8 @@ export function createRegionNpcs(s: Settlement): CityNpc[] {
       : role === 'enforcer' ? '#ff4f6d'
       : i % 2 === 0 ? s.accent : s.secondary;
 
+    const tx = s.x + Math.cos(i * 0.8 + 1.6) * 26;
+    const tz = s.z + Math.sin(i * 0.8 + 1.6) * 26;
     out.push({
       id,
       filename,
@@ -606,8 +673,8 @@ export function createRegionNpcs(s: Settlement): CityNpc[] {
       x: px,
       z: pz,
       yaw: (i * 1.3) % (Math.PI * 2),
-      targetX: px,
-      targetZ: pz,
+      targetX: tx,
+      targetZ: tz,
       wait: i % 3,
       bark: '',
       barkT: 0,
@@ -615,6 +682,7 @@ export function createRegionNpcs(s: Settlement): CityNpc[] {
       antagonized: 0,
       bountyReward: role === 'corrupted' ? 42 : role === 'gladiator' ? 35 : 15,
       respawnT: 0,
+      ...seedLife(id, role, px, pz, tx, tz),
       fighter: buildNpcFighter(id, filename, role, style, gear, color, px, pz),
     });
   }

@@ -25,12 +25,12 @@ export function Ps1Sky({
     const isPurge = mood === 'city_purge';
     const isCity = mood === 'city_cycle' || isPurge;
 
-    const zenith = new THREE.Color(isMorning ? '#1b254a' : isCity ? '#04030d' : '#080614');
+    const zenith = new THREE.Color(isMorning ? '#263669' : isCity ? '#0c0b22' : '#121028');
     const mid = new THREE.Color(
-      isMorning ? '#49588a' : isPurge ? '#240b38' : isCity ? '#0c163a' : mood === 'arena' ? '#211132' : '#181332',
+      isMorning ? '#5f74b3' : isPurge ? '#361454' : isCity ? '#162862' : mood === 'arena' ? '#321c4a' : '#261e4c',
     );
     const horizon = new THREE.Color(
-      isMorning ? '#c2845e' : isPurge ? '#8c184c' : isCity ? '#145a78' : mood === 'arena' ? '#5a2b2c' : '#2f204e',
+      isMorning ? '#e69f73' : isPurge ? '#b42468' : isCity ? '#207ca3' : mood === 'arena' ? '#7a3b3d' : '#432e6e',
     );
     const tmp = new THREE.Color();
 
@@ -59,7 +59,7 @@ export function Ps1Sky({
   const isPurge = mood === 'city_purge';
   const isCity = mood === 'city_cycle' || isPurge;
 
-  const silColor = isPurge ? '#140822' : isCity ? '#091026' : mood === 'arena' ? '#170c1c' : '#110c24';
+  const silColor = isPurge ? '#1f0e33' : isCity ? '#111c3d' : mood === 'arena' ? '#24132b' : '#1b1436';
   const rimColor = isPurge ? '#ff4fd8' : isCity ? '#3ff0ff' : '#a78bfa';
   const coreColor = isMorning ? '#ffe9a6' : isPurge ? '#ff6b8b' : isCity ? '#8cf6ff' : '#f4ecd2';
   const haloColor = isPurge ? '#ff4fd8' : isCity ? '#3ff0ff' : '#ffc95c';
@@ -96,7 +96,7 @@ export function Ps1Sky({
         </mesh>
         <mesh rotation={[0.25, 0.25, 0]}>
           <ringGeometry args={[20, 25, 8]} />
-          <meshBasicMaterial color={haloColor} transparent opacity={0.34} side={THREE.DoubleSide} fog={false} />
+          <meshBasicMaterial color={haloColor} transparent opacity={0.46} side={THREE.DoubleSide} fog={false} />
         </mesh>
         <mesh rotation={[-0.2, 0.6, 0]}>
           <ringGeometry args={[28, 30, 12]} />
